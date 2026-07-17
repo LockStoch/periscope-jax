@@ -49,15 +49,7 @@ try:
     import Cython.Compiler.Options
     
     Cython.Compiler.Options.annotate = True
-
-    EXT_MODULES += cythonize(Extension(
-        "_kx",
-        sources=[os.path.join(HERE, "_kx.pyx")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()]),
-        annotate=True
-    )    
+    
     EXT_MODULES += cythonize(Extension(
         "_kt",
         sources=[os.path.join(HERE, "_kt.pyx")],
@@ -66,48 +58,11 @@ try:
         include_dirs=[np.get_include()]),
         annotate=True
     )
-    EXT_MODULES += cythonize(Extension(
-        "tde",
-        sources=[os.path.join(HERE, "tde.pyx")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()]),
-        annotate=True
-    )
-    EXT_MODULES += cythonize(Extension(
-        "sal",
-        sources=[os.path.join(HERE, "sal.pyx")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()]),
-        annotate=True
-    )
 
 except ImportError:
     EXT_MODULES += [Extension(
-        "_kx",
-        sources=[os.path.join(HERE, "_kx.c")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()])
-    ]
-    EXT_MODULES += [Extension(
         "_kt",
         sources=[os.path.join(HERE, "_kt.c")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()])
-    ]
-    EXT_MODULES += [Extension(
-        "tde",
-        sources=[os.path.join(HERE, "tde.c")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()])
-    ]
-    EXT_MODULES += [Extension(
-        "sal",
-        sources=[os.path.join(HERE, "sal.c")],
         extra_compile_args=COMPILE_ARGS,
         extra_link_args=LINKER_ARGS,
         include_dirs=[np.get_include()])

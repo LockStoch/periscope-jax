@@ -29,7 +29,7 @@ from io_ import init_file, save_step, save_last
 
 from _dt import step_eqns, step_bnds, mark_time
 from _dt import init_RKFB, init_step
-from _dx import invariant, scale_mix
+from _dx import invariant #, scale_mix
 
 def swe(cnfg):
 
@@ -467,8 +467,14 @@ def pre(mesh, mats, flow, cnfg):
     cnfg.hh_diff_k = \
         max (cnfg.hh_diff_k, cnfg.shock_chi)
 
+    """"
     s2_edge, s4_edge, msh_fix = \
         scale_mix(mesh, mats, cnfg)
+    """
+
+    s2_edge = 1.0
+    s4_edge = 1.0
+    msh_fix = 1.0
 
     _var.msh_fix[:] = msh_fix
     _var.msh_nu2[:] = s2_edge
