@@ -1292,6 +1292,8 @@ def _tend_uadv(mesh, mats, cnfg,
 
     cdef REALS_t *MESH_EDGE_CLEN = ptr_reals_t(
                   mesh.edge.clen)
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
 
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
 
@@ -1341,7 +1343,9 @@ def _tend_uadv(mesh, mats, cnfg,
                 
             KE_GRAD = KE_GRAD * do_advect
         
-            UU_TEND[edge]+= KE_GRAD + HALF * UV_FLUX
+            UU_TEND[edge]+= \
+                MESH_EDGE_MASK[edge] \
+                    * (KE_GRAD  + HALF * UV_FLUX)
 
     put_vec_e   (uh_flux)
     put_vec_e   (fh_flux)
@@ -1393,6 +1397,8 @@ def _tend_upgf(mesh, mats, cnfg,
 
     cdef REALS_t *MESH_EDGE_CLEN = ptr_reals_t(
                   mesh.edge.clen)
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
 
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
 
@@ -1441,7 +1447,8 @@ def _tend_upgf(mesh, mats, cnfg,
                 sal_const * min(ONE_, sqrt_r(HH_MIN_/sal_scale)
                 ) )
 
-            UU_TEND[edge]+= gravity * ZT_GRAD
+            UU_TEND[edge]+= \
+                MESH_EDGE_MASK[edge] * gravity * ZT_GRAD
     
     return uu_tend
 
@@ -1484,6 +1491,8 @@ def _tend_ugeo(mesh, mats, cnfg,
 
     cdef REALS_t *MESH_EDGE_CLEN = ptr_reals_t(
                   mesh.edge.clen)
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
 
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
 
@@ -1510,7 +1519,8 @@ def _tend_ugeo(mesh, mats, cnfg,
                 
             XI_GRAD =(X2_CELL - X1_CELL) / MESH_EDGE_CLEN[edge]
 
-            UU_TEND[edge]+= XI_GRAD * frc_start
+            UU_TEND[edge]+= \
+                MESH_EDGE_MASK[edge] * XI_GRAD * frc_start
         
     return uu_tend
 
@@ -1550,6 +1560,8 @@ def _tend_utde(mesh, mats, cnfg,
 
     cdef REALS_t *MESH_EDGE_CLEN = ptr_reals_t(
                   mesh.edge.clen)
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
 
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
 
@@ -1570,7 +1582,8 @@ def _tend_utde(mesh, mats, cnfg,
                 
             XI_GRAD =(X2_CELL - X1_CELL) / MESH_EDGE_CLEN[edge]
 
-            UU_TEND[edge]-= XI_GRAD * frc_start
+            UU_TEND[edge]-= \
+                MESH_EDGE_MASK[edge] * XI_GRAD * frc_start
 
     return uu_tend
 
@@ -1658,6 +1671,7 @@ def _calc_umix(mesh, mats, cnfg,
     cdef INDEX_t chunkvert = cnfg.chunkvert
 
     # factor of 2 is from 2 * slen below
+    cdef REALS_t leith_max = cnfg.leith_max
     cdef REALS_t leith_chi = \
             cnfg.leith_chi * (2.0 / np.pi) ** 3
 
@@ -1672,8 +1686,9 @@ def _calc_umix(mesh, mats, cnfg,
     
     cdef REALS_t *NU_TURB = &nu_turb[0]
 
-    cdef REALS_t[::1] nu_max_ = cnfg.leith_max
-    cdef REALS_t *NU_MAX_ = &nu_max_[0]
+    cdef np.ndarray[REALS_t] msh_nu2 = variables.msh_nu2
+    
+    cdef REALS_t *MSH_NU2 = &msh_nu2[0]
     
     cdef INDEX_t *GRAD_NORM_XPTR = ptr_index_t(
              mats.edge_grad_norm.indptr)
@@ -1728,8 +1743,9 @@ def _calc_umix(mesh, mats, cnfg,
                             MESH_EDGE_SLEN[edge] * \
                             MESH_EDGE_SLEN[edge]
 
-            NU_TURB[edge] = \
-                       min(NU_TURB[edge], NU_MAX_[edge])
+            NU_TURB[edge] = min(
+                NU_TURB[edge], leith_max * MSH_NU2[edge]
+                )
         
     return variables.nu_turb
 
@@ -1765,6 +1781,7 @@ def _calc_uwav(mesh, mats, cnfg,
     cdef INDEX_t chunkedge = cnfg.chunkedge
     cdef INDEX_t chunkvert = cnfg.chunkvert
 
+    cdef REALS_t waves_max = cnfg.waves_max
     cdef REALS_t waves_chi = cnfg.waves_chi * HALF
     
     cdef INDEX_t NVRT = mesh.vert.size
@@ -1783,11 +1800,11 @@ def _calc_uwav(mesh, mats, cnfg,
 
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
 
-    cdef REALS_t[::1] nu_max_ = cnfg.waves_max
-    cdef REALS_t *NU_MAX_ = &nu_max_[0]
+    cdef np.ndarray[REALS_t] msh_fix = variables.msh_fix
+    cdef np.ndarray[REALS_t] msh_nu2 = variables.msh_nu2
 
-    cdef REALS_t[::1] nu_fix_ = cnfg.msh_fix_k
-    cdef REALS_t *NU_FIX_ = &nu_fix_[0]
+    cdef REALS_t *MSH_FIX = &msh_fix[0]
+    cdef REALS_t *MSH_NU2 = &msh_nu2[0]
 
     # clen scaling as visc. acts on div(u)
     cdef REALS_t *MESH_EDGE_CLEN = ptr_reals_t(
@@ -1808,7 +1825,7 @@ def _calc_uwav(mesh, mats, cnfg,
             H1_CELL = max(hh_tiny,HH_CELL[cel1])
             H2_CELL = max(hh_tiny,HH_CELL[cel2])
 
-            SENSOR_ = ONE_ + NU_FIX_[edge]  # topol. fix
+            SENSOR_ = ONE_ + MSH_FIX[edge]  # topol. fix
 
         #-- central-upwind scheme: hrm. average of waves
            #UU_WAVE = fabs_r(UU_EDGE[edge])
@@ -1825,8 +1842,8 @@ def _calc_uwav(mesh, mats, cnfg,
 
             NU_WAVE[edge] = waves_chi * SENSOR_ * CC_WAVE
             NU_WAVE[edge]*= MESH_EDGE_CLEN[edge]
-            NU_WAVE[edge] = \
-                min(NU_WAVE[edge], NU_MAX_[edge]
+            NU_WAVE[edge] = min(
+                NU_WAVE[edge], waves_max * MSH_NU2[edge]
                 )
 
     return variables.nu_wave
@@ -1867,6 +1884,7 @@ def _calc_hmix(mesh, mats, cnfg,
 
     cdef REALS_t shock_chi = cnfg.shock_chi * HALF
     cdef REALS_t shock_cut = cnfg.shock_cut
+    cdef REALS_t shock_max = cnfg.shock_max
     
     cdef INDEX_t NVRT = mesh.vert.size
     cdef INDEX_t NEDG = mesh.edge.size
@@ -1888,11 +1906,11 @@ def _calc_hmix(mesh, mats, cnfg,
         
     cdef REALS_t *ZT_GRAD = &zt_grad[0]
 
-    cdef REALS_t[::1] nu_max_ = cnfg.shock_max
-    cdef REALS_t *NU_MAX_ = &nu_max_[0]
+    cdef np.ndarray[REALS_t] msh_fix = variables.msh_fix
+    cdef np.ndarray[REALS_t] msh_nu2 = variables.msh_nu2
 
-    cdef REALS_t[::1] nu_fix_ = cnfg.msh_fix_k
-    cdef REALS_t *NU_FIX_ = &nu_fix_[0]
+    cdef REALS_t *MSH_FIX = &msh_fix[0]
+    cdef REALS_t *MSH_NU2 = &msh_nu2[0]
 
     cdef INDEX_t *CELL_FLUX_XPTR = ptr_index_t(
              mats.cell_flux_sums.indptr)
@@ -1970,7 +1988,7 @@ def _calc_hmix(mesh, mats, cnfg,
             H1_CELL = max(hh_tiny,HH_CELL[cel1])
             H2_CELL = max(hh_tiny,HH_CELL[cel2])
 
-            SENSOR_ = ONE_ + NU_FIX_[edge]  # topol. fix
+            SENSOR_ = ONE_ + MSH_FIX[edge]  # topol. fix
         
             SENSOR_ = SENSOR_ * \
                 max(OS_SHOC[cel1],OS_SHOC[cel2])
@@ -1989,8 +2007,8 @@ def _calc_hmix(mesh, mats, cnfg,
 
             NU_SHOC[edge] = shock_chi * SENSOR_ * CC_WAVE
             NU_SHOC[edge]*= MESH_EDGE_CLEN[edge]
-            NU_SHOC[edge] = \
-                min(NU_SHOC[edge], NU_MAX_[edge]
+            NU_SHOC[edge] = min(
+                NU_SHOC[edge], shock_max * MSH_NU2[edge]
                 )
             
     put_vec_e  (zt_grad)
@@ -2052,10 +2070,10 @@ def _tend_umix(mesh, mats, cnfg,
 
     cdef REALS_t *KE_DISS = &ke_diss[0]
 
-    cdef REALS_t[::1] v2_visc = cnfg.uu_visc_2
+    cdef np.ndarray[REALS_t] v2_visc = variables.visc_u2
+    cdef np.ndarray[REALS_t] v4_visc = variables.visc_u4
+
     cdef REALS_t *V2_VISC = &v2_visc[0]
-    
-    cdef REALS_t[::1] v4_visc = cnfg.uu_visc_4
     cdef REALS_t *V4_VISC = &v4_visc[0]
 
     cdef np.ndarray[REALS_t] vk_edge = get_vec_e()
@@ -2325,6 +2343,7 @@ def _tend_umix(mesh, mats, cnfg,
     
     put_vec_c  (uh_cell)
     put_vec_c  (du_cell)
+
     put_vec_v  (rv_dual)
                      
     return uu_tend
@@ -2368,11 +2387,11 @@ def _tend_hmix(mesh, mats, cnfg,
     cdef FLT32_t *ZB_CELL = &zb_cell[0]
     cdef REALS_t *NU_SHOC = &nu_shoc[0]
     cdef HTEND_t *HH_TEND = &hh_tend[0]
-    
-    cdef REALS_t[::1] v2_diff = cnfg.hh_diff_2
+   
+    cdef np.ndarray[REALS_t] v2_diff = variables.diff_h2
+    cdef np.ndarray[REALS_t] v4_diff = variables.diff_h4
+
     cdef REALS_t *V2_DIFF = &v2_diff[0]
-    
-    cdef REALS_t[::1] v4_diff = cnfg.hh_diff_4
     cdef REALS_t *V4_DIFF = &v4_diff[0]
     
     cdef np.ndarray[REALS_t] v2_cell = get_vec_c()
@@ -2536,8 +2555,10 @@ def _tend_hmix(mesh, mats, cnfg,
     
     put_vec_c  (ok_cell)
     put_vec_e  (ok_edge)
+
     put_vec_c  (v4_cell)
     put_vec_c  (v2_cell)
+
     put_vec_e  (h2_edge)
     put_vec_e  (h4_edge)
     
@@ -2580,6 +2601,9 @@ def _tend_utau(mesh, mats, cnfg,
     cdef REALS_t *HH_EDGE = &hh_edge[0]
     cdef UTEND_t *UU_TEND = &uu_tend[0]
     
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
+
     with nogil, parallel(num_threads=numthread):
     
         for edge in prange(0, NEDG, schedule="static", 
@@ -2591,7 +2615,7 @@ def _tend_utau(mesh, mats, cnfg,
                       ) )
                 
         #-- limit applied stresses in quasi-dry layers
-            UU_TEND[edge]-= (
+            UU_TEND[edge]-= MESH_EDGE_MASK[edge] * (
                 TU_EDGE / max (hh_tiny, HH_EDGE[edge])
                 )
         
@@ -2762,6 +2786,9 @@ def _calc_drag(mesh, mats, cnfg,
     
     cdef INDEX_t[:, ::1] mesh_edge_cell = mesh.edge.cell
     
+    cdef REALS_t *MESH_EDGE_MASK = ptr_reals_t(
+                  mesh.edge.fmsk)
+
     with nogil, parallel(num_threads=numthread):
     
         ku_tiny = sqrt_r(ke_tiny * TWO_)
@@ -2828,6 +2855,7 @@ def _calc_drag(mesh, mats, cnfg,
             # drag dissipation: u * h * cd * u
             if (do_dissip): \
             KE_DISS[edge]+= CD_EDGE[edge] \
+                   * MESH_EDGE_MASK[edge] \
                 * (ku_edge * ku_edge * hu_edge)
     
     return variables.cd_edge

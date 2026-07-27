@@ -89,15 +89,18 @@ def calc_vars(mesh, mats, flow, cnfg, hh_cell, uu_edge,
 
 #-- compute diagnostic variables from the current state
 
-    ff_dual = flow.ff_vert; ff_edge = flow.ff_edge
-    ff_cell = flow.ff_cell
+    ff_dual = variables.ff_vert
+    ff_edge = variables.ff_edge
+    ff_cell = variables.ff_cell
     
     Xi_tide = variables.Xi_tide  # lagged values
     Xi_self = variables.Xi_self
 
     uu_filt = variables.uu_filt
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     vv_edge = calc_perp(mesh, mats, cnfg, uu_edge)
 
@@ -142,10 +145,13 @@ def invariant(mesh, mats, flow, cnfg, hh_cell, uu_edge,
 
 #-- compute the discrete energy and enstrophy invariants
 
-    ff_dual = flow.ff_vert; ff_edge = flow.ff_edge
-    ff_cell = flow.ff_cell
+    ff_dual = variables.ff_vert
+    ff_edge = variables.ff_edge
+    ff_cell = variables.ff_cell
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     vv_edge = calc_perp(mesh, mats, cnfg, uu_edge)
 

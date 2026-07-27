@@ -12,21 +12,21 @@ if   ("linux" in platform.system().lower()):
 
     print("*Compiling for Linux")
     COMPILE_ARGS = [
-        "-O3", "-flto", "-fopenmp", 
-            "-ffast-math", "-fno-finite-math-only"]
+        "-O3", "-flto", "-fopenmp", "-ffast-math", 
+            "-fno-finite-math-only", "-march=native"]
     LINKER_ARGS = [
-        "-O3", "-flto", "-fopenmp", 
-            "-ffast-math", "-fno-finite-math-only"]
+        "-O3", "-flto", "-fopenmp", "-ffast-math", 
+            "-fno-finite-math-only", "-march=native"]
 
 elif ("darwin" in platform.system().lower()):
 
     print("*Compiling for MacOS")
     COMPILE_ARGS = [
-        "-O3", "-flto", "-Xclang", "-fopenmp", 
-            "-ffast-math", "-fno-finite-math-only"]
+        "-O3", "-flto", "-fopenmp", "-ffast-math", 
+            "-Xclang", "-fno-finite-math-only"]
     LINKER_ARGS = [
-        "-O3", "-flto", "-lomp", 
-            "-ffast-math", "-fno-finite-math-only"]
+        "-O3", "-flto", "-lomp", "-ffast-math", 
+            "-fno-finite-math-only"]
 
 elif ("win" in platform.system.lower()):
 

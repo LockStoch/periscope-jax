@@ -154,7 +154,7 @@ def step_bnds(mesh, mats, flow, cnfg,
     qq_min_, qq_max_ = \
         bnd_x_vec(cnfg, qq_cell, qq_min_, qq_max_)
 
-    zb_cell =      flow.zb_cell
+    zb_cell = variables.zb_cell
 
     if ("zt_cell" in cnfg.stat_vars): \
     zt_rms_ = \
@@ -201,11 +201,12 @@ def step_RK33(mesh, mats, flow, cnfg,
     isFB = 1.0 * ("FB" in cnfg.integrate)
 
     gravity = flow.gravity
-    dz_drag = flow.dz_drag
-    c1_edge = flow.c1_edge
-    c2_edge = flow.c2_edge
-    z0_edge = flow.z0_edge
-    n0_edge = flow.n0_edge
+    
+    dz_drag = variables.dz_drag
+    c1_edge = variables.c1_edge
+    c2_edge = variables.c2_edge
+    z0_edge = variables.z0_edge
+    n0_edge = variables.n0_edge
 
     cd_edge = variables.cd_save
 
@@ -504,11 +505,12 @@ def step_RK43(mesh, mats, flow, cnfg,
     isFB = 1.0 * ("FB" in cnfg.integrate)
 
     gravity = flow.gravity
-    dz_drag = flow.dz_drag
-    c1_edge = flow.c1_edge
-    c2_edge = flow.c2_edge
-    z0_edge = flow.z0_edge
-    n0_edge = flow.n0_edge
+
+    dz_drag = variables.dz_drag
+    c1_edge = variables.c1_edge
+    c2_edge = variables.c2_edge
+    z0_edge = variables.z0_edge
+    n0_edge = variables.n0_edge
 
     cd_edge = variables.cd_save
 

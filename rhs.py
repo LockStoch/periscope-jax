@@ -41,7 +41,9 @@ def rhs_tde_d(mesh, mats, flow, cnfg, hh_cell, uu_edge):
             not cnfg.calc_tide or cnfg.rhs_stage != 1: 
         return
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell 
+
+    gravity = flow.gravity
 
     Xi_tide = variables.Xi_tide
     Xi_self = variables.Xi_self
@@ -50,7 +52,7 @@ def rhs_tde_d(mesh, mats, flow, cnfg, hh_cell, uu_edge):
     Xi_tide = calc_tide(mesh, mats, cnfg, gravity, Xi_tide)
     
     Xi_self = calc_self(mesh, mats, cnfg, hh_cell, zb_cell, 
-                                          gravity, Xi_self)    
+                                          gravity, Xi_self)
 
     return
 
@@ -59,7 +61,9 @@ def rhs_all_d(mesh, mats, flow, cnfg, hh_cell, uu_edge):
 
 #-- evaluate full tendency diagnostics
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     hE_prev = flow.prev.hE_edge
     uE_prev = flow.prev.uE_edge
@@ -67,8 +71,9 @@ def rhs_all_d(mesh, mats, flow, cnfg, hh_cell, uu_edge):
     hE_next = flow.next.hE_edge
     uE_next = flow.next.uE_edge
 
-    ff_cell = flow.ff_cell; ff_edge = flow.ff_edge
-    ff_dual = flow.ff_vert
+    ff_cell = variables.ff_cell
+    ff_edge = variables.ff_edge
+    ff_dual = variables.ff_vert
 
     ke_diss = variables.ke_diss
 
@@ -145,7 +150,9 @@ def rhs_fst_h(mesh, mats, flow, cnfg, hh_cell, uu_edge, hh_tend):
 
     if cnfg.no_h_tend or not cnfg.calc_fast:return hh_tend
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
     
     hh_edge = variables.hh_edge
 
@@ -185,7 +192,9 @@ def rhs_slw_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
 
     if cnfg.no_u_tend or not cnfg.calc_slow:return uu_tend
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     Xi_prev = flow.prev.Xi_cell
     Xi_next = flow.next.Xi_cell
@@ -195,8 +204,9 @@ def rhs_slw_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
     Tu_prev = flow.prev.Tu_edge
     Tu_next = flow.next.Tu_edge
  
-    ff_cell = flow.ff_cell; ff_edge = flow.ff_edge
-    ff_dual = flow.ff_vert
+    ff_cell = variables.ff_cell
+    ff_edge = variables.ff_edge
+    ff_dual = variables.ff_vert
 
     hh_dual = variables.hh_dual
     hh_edge = variables.hh_edge
@@ -233,8 +243,6 @@ def rhs_slw_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
     uu_tend = tend_utau(mesh, mats, cnfg, Tu_prev, Tu_next,
                                           hh_edge,
                                           uu_tend)
-
-    uu_tend[mesh.edge.mask] = utend_t(0.0)
     
     return uu_tend
 
@@ -245,7 +253,9 @@ def rhs_fst_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
 
     if cnfg.no_u_tend or not cnfg.calc_fast:return uu_tend
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     hh_dual = variables.hh_dual
     hh_edge = variables.hh_edge
@@ -263,8 +273,6 @@ def rhs_fst_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
                                           nu_thin,
                                           uu_tend)
 
-    uu_tend[mesh.edge.mask] = utend_t(0.0)
-
     return uu_tend
 
 
@@ -274,7 +282,9 @@ def rhs_pgf_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
 
     if cnfg.no_u_tend or not cnfg.calc_fast:return uu_tend
 
-    zb_cell = flow.zb_cell; gravity = flow.gravity
+    zb_cell = variables.zb_cell
+
+    gravity = flow.gravity
 
     Xi_self = variables.Xi_self
 
@@ -282,8 +292,6 @@ def rhs_pgf_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
     uu_tend = tend_upgf(mesh, mats, cnfg, hh_cell, zb_cell, 
                                           gravity, Xi_self,
                                           uu_tend)
-
-    uu_tend[mesh.edge.mask] = utend_t(0.0)
 
     return uu_tend
 

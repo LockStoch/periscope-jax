@@ -21,7 +21,9 @@ from msh import load_mesh, sort_mesh, \
                 load_forc, sort_forc, \
                 init_wall, init_obcs
 from ops import operators
-from mem import init_pool, variables
+
+from mem import init_pool
+from mem import variables as _var
 
 from io_ import init_file, save_step, save_last
 
@@ -124,33 +126,33 @@ def swe(cnfg):
 
     kp_sum_ = []; en_sum_ = [];
     
-    init_pool(mesh)  # alloc. internal arrays
+    init_pool(cnfg, mesh)  # alloc. internal arrays
 
-    hh_cell = variables.hh_cell
+    hh_cell = _var.hh_cell
     hh_cell[:] = flow.hh_cell
-    hh_min_ = variables.hh_min_
-    hh_max_ = variables.hh_max_
+    hh_min_ = _var.hh_min_
+    hh_max_ = _var.hh_max_
     hh_min_[:] = flow.hh_cell; hh_max_[:] = flow.hh_cell
     
-    uu_edge = variables.uu_edge
+    uu_edge = _var.uu_edge
     uu_edge[:] = flow.uu_edge
-    uu_filt = variables.uu_filt
+    uu_filt = _var.uu_filt
     uu_filt[:] = flow.uu_filt
-    uu_min_ = variables.uu_min_
-    uu_max_ = variables.uu_max_
+    uu_min_ = _var.uu_min_
+    uu_max_ = _var.uu_max_
     uu_min_[:] = flow.uu_edge; uu_max_[:] = flow.uu_edge
 
-    qq_cell = variables.qq_cell
-    qq_min_ = variables.qq_min_
-    qq_max_ = variables.qq_max_
+    qq_cell = _var.qq_cell
+    qq_min_ = _var.qq_min_
+    qq_max_ = _var.qq_max_
 
-    zt_rms_ = variables.zt_rms_
-    ke_ave_ = variables.ke_ave_
-    ke_rms_ = variables.ke_rms_
-    ke_max_ = variables.ke_max_
-    dk_ave_ = variables.dk_ave_
-    dk_rms_ = variables.dk_rms_
-    dk_max_ = variables.dk_max_
+    zt_rms_ = _var.zt_rms_
+    ke_ave_ = _var.ke_ave_
+    ke_rms_ = _var.ke_rms_
+    ke_max_ = _var.ke_max_
+    dk_ave_ = _var.dk_ave_
+    dk_rms_ = _var.dk_rms_
+    dk_max_ = _var.dk_max_
 
     uu_edge[mesh.edge.mask] = 0.  # ensure BC
     uu_edge[mesh.edge.open] =flow.uu_edge[mesh.edge.open]
@@ -396,25 +398,25 @@ def pre(mesh, mats, flow, cnfg):
     flow.ff_cell = mats.cell_kite_sums*flow.ff_vert
     flow.ff_cell/= mesh.cell.area
     
-    flow.ff_vert = np.asarray(
+    _var.ff_vert[:] = np.asarray(
            flow.ff_vert, dtype=flt32_t)
-    flow.ff_edge = np.asarray(
+    _var.ff_edge[:] = np.asarray(
            flow.ff_edge, dtype=flt32_t)
-    flow.ff_cell = np.asarray(
+    _var.ff_cell[:] = np.asarray(
            flow.ff_cell, dtype=flt32_t)
 
-    flow.ff_cell*= (not cnfg.no_rotate)
-    flow.ff_edge*= (not cnfg.no_rotate)
-    flow.ff_vert*= (not cnfg.no_rotate)
+    _var.ff_cell*= (not cnfg.no_rotate)
+    _var.ff_edge*= (not cnfg.no_rotate)
+    _var.ff_vert*= (not cnfg.no_rotate)
 
-    cnfg.ff_max_ = np.max(np.abs(flow.ff_edge))
+    cnfg.ff_max_ = np.max(np.abs(_var.ff_edge))
 
     flow.h0_rms_ = \
-        np.sqrt(np.mean(flow.hh_cell ** 2))
+        np.sqrt(np.mean(_var.hh_cell ** 2))
     flow.u0_rms_ = \
-        np.sqrt(np.mean(flow.uu_edge ** 2))
+        np.sqrt(np.mean(_var.uu_edge ** 2))
     flow.p0_rms_ = \
-        np.sqrt(np.mean(flow.ff_cell ** 2))
+        np.sqrt(np.mean(_var.ff_cell ** 2))
 
     flow.c0_rms_ = flow.u0_rms_ + \
         np.sqrt (flow.gravity * flow.h0_rms_)
@@ -435,17 +437,20 @@ def pre(mesh, mats, flow, cnfg):
              cnfg.loglaw_z0, cnfg.manlaw_n0
            ] )
     
-    flow.c1_edge*= cnfg.linlaw_cd
-    flow.c2_edge*= cnfg.sqrlaw_cd
-    flow.z0_edge*= cnfg.loglaw_z0
-    flow.n0_edge*= cnfg.manlaw_n0
+    _var.c1_edge[:] = flow.c1_edge * cnfg.linlaw_cd
+    _var.c2_edge[:] = flow.c2_edge * cnfg.sqrlaw_cd
+    _var.z0_edge[:] = flow.z0_edge * cnfg.loglaw_z0
+    _var.n0_edge[:] = flow.n0_edge * cnfg.manlaw_n0
 
     # subgrid drag thickness scale
     flow.dz_drag = np.asarray (
         mats.edge_wing_sums * (
         np.maximum(0.0, flow.zb_drag - flow.zb_cell
         ) ), dtype=flt32_t)
-    flow.dz_drag/= mesh.edge.area
+    flow.dz_drag /= mesh.edge.area
+
+    _var.zb_cell[:] = flow.zb_cell
+    _var.dz_drag[:] = flow.dz_drag
 
     # mesh scaling for dissipation
     cnfg.uu_visc_k = \
@@ -462,27 +467,24 @@ def pre(mesh, mats, flow, cnfg):
     cnfg.hh_diff_k = \
         max (cnfg.hh_diff_k, cnfg.shock_chi)
 
-    s2_edge, s4_edge, cnfg.msh_fix_k = \
+    s2_edge, s4_edge, msh_fix = \
         scale_mix(mesh, mats, cnfg)
 
-    cnfg.uu_visc_2 = np.asarray(
+    _var.msh_fix[:] = msh_fix
+    _var.msh_nu2[:] = s2_edge
+    _var.msh_nu4[:] = s4_edge
+
+    _var.visc_u2[:] = np.asarray(
         (cnfg.uu_visc_2 * s2_edge), dtype=reals_t)
-    cnfg.uu_visc_4 = np.asarray(
+    _var.visc_u4[:] = np.asarray(
         (cnfg.uu_visc_4 * s4_edge), dtype=reals_t)
 
-    cnfg.hh_diff_2 = np.asarray(
+    _var.diff_h2[:] = np.asarray(
         (cnfg.hh_diff_2 * s2_edge), dtype=reals_t)
-    cnfg.hh_diff_4 = np.asarray(
+    _var.diff_h4[:] = np.asarray(
         (cnfg.hh_diff_4 * s4_edge), dtype=reals_t)
    
-    cnfg.hh_diff_4 = np.sqrt(cnfg.hh_diff_4)
-    
-    cnfg.leith_max = np.asarray(
-        (cnfg.leith_max * s2_edge), dtype=reals_t)
-    cnfg.waves_max = np.asarray(
-        (cnfg.waves_max * s2_edge), dtype=reals_t)
-    cnfg.shock_max = np.asarray(
-        (cnfg.shock_max * s2_edge), dtype=reals_t)
+    _var.diff_h4[:] = np.sqrt(_var.diff_h4)
 
     return flow, cnfg
 

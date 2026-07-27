@@ -15,6 +15,8 @@ from _fp import reals_t, index_t
 
 from log import tcpu
 
+from mem import variables
+
 from _dx import calc_vars
 
 class base: pass
@@ -322,25 +324,25 @@ def save_last(save, mesh, mats, flow, cnfg, step, kp_sum_, en_sum_,
     data.variables["dk_max_"][:] = \
                xt_dual[mesh.vert.irev - 1]
     
-    xt_dual = mats.dual_tail_sums * cnfg.uu_visc_2
+    xt_dual = mats.dual_tail_sums * variables.visc_u2
     xt_dual/= mesh.vert.area
     
     data.variables["u2_visc"][:] = \
                xt_dual[mesh.vert.irev - 1]
     
-    xt_dual = mats.dual_tail_sums * cnfg.uu_visc_4
+    xt_dual = mats.dual_tail_sums * variables.visc_u4
     xt_dual/= mesh.vert.area
     
     data.variables["u4_visc"][:] = \
                xt_dual[mesh.vert.irev - 1]
     
-    xt_dual = mats.dual_tail_sums * cnfg.hh_diff_2
+    xt_dual = mats.dual_tail_sums * variables.diff_h2
     xt_dual/= mesh.vert.area
 
     data.variables["h2_diff"][:] = \
                xt_dual[mesh.vert.irev - 1]
 
-    xt_dual = mats.dual_tail_sums * cnfg.hh_diff_4
+    xt_dual = mats.dual_tail_sums * variables.diff_h4
     xt_dual/= mesh.vert.area
 
     data.variables["h4_diff"][:] = \
