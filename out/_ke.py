@@ -1,4 +1,5 @@
 
+import time
 import sys
 import os
 import numpy as np
@@ -7,7 +8,6 @@ import matplotlib.pyplot as plt
 import argparse
 
 from scipy.ndimage import gaussian_filter
-from spharm import Spharmt, getspecindx
 
 sys.path.insert(
     1, os.path.join(sys.path[0], ".."))
@@ -23,30 +23,36 @@ from _fp import reals_t, index_t
 
 def spectra(udiv, urot, rsph):
 #-- build kinetic energy spectra from div, rot
+#-- apt install libfftw3-dev
+    import shtns
+
     nlat, nlon = udiv.shape
 
-    ntrunc = nlat - 1
+    lmax = nlat - 1
+    mmax = nlat - 1
 
-    sp = Spharmt(
-        nlon, nlat, rsphere=rsph, gridtype="regular")
+    sh = shtns.sht(lmax, mmax)
 
-    sdiv = sp.grdtospec(udiv, ntrunc)
-    srot = sp.grdtospec(urot, ntrunc)
-   
-    indxm, indxn = getspecindx(ntrunc)
+    sh.set_grid(nlat=nlat, nphi=nlon)
 
-    ke_rot = np.zeros(ntrunc + 1)
-    ke_div = np.zeros(ntrunc + 1)
-    for n in range(1, ntrunc + 1):
-        mask = (indxn == n)
-        
-        scal = (rsph ** 2) / (2.0 * n * (n + 1.0))
-        
-        ke_rot[n] = scal * np.sum(np.abs(srot[mask]) ** 2)
-        ke_div[n] = scal * np.sum(np.abs(sdiv[mask]) ** 2)
-        
+    sdiv = sh.analys(udiv)
+    srot = sh.analys(urot)
+
+    wave_n = np.arange(lmax + 1)
+
+    factor = ((rsph ** 2) / 
+        np.maximum(1, (2 * wave_n * (wave_n + 1))))
+    factor[0] = 0.0
+
+    ke_rot = factor * np.bincount(
+        sh.l, minlength=lmax+1,
+        weights=srot.real ** 2 + srot.imag ** 2)
+
+    ke_div = factor * np.bincount(
+        sh.l, minlength=lmax+1, 
+        weights=sdiv.real ** 2 + sdiv.imag ** 2)
+    
     ke_tot = ke_rot + ke_div
-    wave_n = np.arange(ntrunc + 1)
 
     return wave_n, ke_tot, ke_rot, ke_div
 
@@ -64,6 +70,11 @@ if (__name__ == "__main__"):
         "--spec-file", dest="spec_file", type=str,
         default="",
         required=False, help="Path to save spectrum.")
+
+    parser.add_argument(
+        "--numthread", dest="numthread", type=int,
+        default=1,
+        required=False, help="Number of cpu threads.")
     
     parser.add_argument(
         "--init-step", dest="init_step", type=int,
@@ -82,6 +93,8 @@ if (__name__ == "__main__"):
         required=False, help="TRUE to display plots.")
     
     args = parser.parse_args()
+
+    os.environ["OMP_NUM_THREADS"] = str(args.numthread)
 
     print("Loading the mesh file...")
     
@@ -112,6 +125,7 @@ if (__name__ == "__main__"):
 
     xlon, ylat = np.meshgrid(lons, lats)
 
+#-- remap from MPAS mesh to lon-lat grid
     xpos = mesh.rsph * np.cos(xlon) * np.cos(ylat)
     ypos = mesh.rsph * np.sin(xlon) * np.cos(ylat)
     zpos = mesh.rsph * np.sin(ylat)
@@ -134,11 +148,12 @@ if (__name__ == "__main__"):
 
     vmap, __ = idw_remap(ppos, qpos, halo=10, dpow=4)
 
-
+#-- build spectra and average over steps
     head = 0; tail = divu.shape[0] - 1
     if (args.init_step >= 0): head = args.init_step
     if (args.stop_step >= 0): tail = args.stop_step
 
+    ttic = time.time()
     nout = tail - head + 1 
     oinc = nout // 50
     next = head + oinc
@@ -157,8 +172,8 @@ if (__name__ == "__main__"):
             udiv, sigma=1./2., mode=("reflect", "wrap"))
         urot = gaussian_filter(
             urot, sigma=1./2., mode=("reflect", "wrap"))
-    
-        udiv = np.flipud(udiv)  # north=>south for spharm
+        
+        udiv = np.flipud(udiv)  # north=>south for shtns
         urot = np.flipud(urot)
 
         bins, ke_tot, ke_rot, ke_div = spectra(udiv, urot, mesh.rsph)
@@ -178,8 +193,10 @@ if (__name__ == "__main__"):
         else:
             ke_mean_div+= ke_div / nout
 
+    ttoc = time.time()
+
     print()
-    print("Spectrum calc. complete.")
+    print("Spectrum calc. complete. (", round(ttoc-ttic, 1), "sec )")
 
     """
     data = nc.Dataset("_ke.nc", "w")
