@@ -23,6 +23,7 @@ from _fp import reals_t, index_t
 
 def spectra(udiv, urot, rsph):
 #-- build kinetic energy spectra from div, rot
+#-- also return the enstrophy spectra
 #-- apt install libfftw3-dev
     import shtns
 
@@ -52,9 +53,12 @@ def spectra(udiv, urot, rsph):
         sh.l, minlength=lmax+1, 
         weights=sdiv.real ** 2 + sdiv.imag ** 2)
     
+    factor[0] = 1.0
+    en_tot = ke_rot / factor * 0.5 * (rsph ** 2)
+
     ke_tot = ke_rot + ke_div
 
-    return wave_n, ke_tot, ke_rot, ke_div
+    return wave_n, en_tot, ke_tot, ke_rot, ke_div
 
 
 if (__name__ == "__main__"):
@@ -157,6 +161,7 @@ if (__name__ == "__main__"):
     nout = tail - head + 1 
     oinc = nout // 50
     next = head + oinc
+    en_mean_tot = None
     ke_mean_tot = None
     ke_mean_rot = None
     ke_mean_div = None
@@ -176,7 +181,13 @@ if (__name__ == "__main__"):
         udiv = np.flipud(udiv)  # north=>south for shtns
         urot = np.flipud(urot)
 
-        bins, ke_tot, ke_rot, ke_div = spectra(udiv, urot, mesh.rsph)
+        bins, en_tot, ke_tot, ke_rot, ke_div = \
+            spectra(udiv, urot, mesh.rsph)
+
+        if (en_mean_tot is None):
+            en_mean_tot = en_tot / nout
+        else:
+            en_mean_tot+= en_tot / nout
 
         if (ke_mean_tot is None):
             ke_mean_tot = ke_tot / nout
@@ -234,10 +245,19 @@ if (__name__ == "__main__"):
     plt.loglog(bins[4:-1], ke_mean_div[4:-1], 
                color= "red", linewidth=+2.0, linestyle=":")
     """
-    plt.loglog(bins[10:100], 1.0e+03 * (bins[10:100] ** -3.0), 
+    plt.loglog(bins[20:100], 8.0e+03 * (bins[20:100] ** -3.0), 
                color="gray", linestyle="--")    
     plt.xlabel(r"wavenumber $[n]$")
-    plt.ylabel(r"$\mathrm{KE}[n]$")
+    plt.ylabel(r"$\mathrm{E}[n]$")
+    plt.grid(True, which="both", ls="-", alpha=0.25)
+
+    plt.figure()
+    plt.loglog(bins[4:-1], en_mean_tot[4:-1], 
+               color="blue", linewidth=+2.0)
+    plt.loglog(bins[20:100], 4.0e+03 * (bins[20:100] ** -1.0), 
+               color="gray", linestyle="--")    
+    plt.xlabel(r"wavenumber $[n]$")
+    plt.ylabel(r"$\mathrm{Z}[n]$")
     plt.grid(True, which="both", ls="-", alpha=0.25)
 
     if (args.show_plot): plt.show()
