@@ -229,12 +229,21 @@ if (__name__ == "__main__"):
         data.createDimension("nwav", bins.size)
         data.createVariable("wave_n", "f4", ("nwav"))
         data["wave_n"][:] = bins
+        data["wave_n"].long_name = "Spherical wavenumbers"
+        data.createVariable("en_tot", "f4", ("nwav"))
+        data["en_tot"][:] = en_mean_tot
+        data["en_tot"].long_name = "Total enstrophy spectrum"
         data.createVariable("ke_tot", "f4", ("nwav"))
         data["ke_tot"][:] = ke_mean_tot
+        data["ke_tot"].long_name = "Total kinetic energy spectrum"
         data.createVariable("ke_rot", "f4", ("nwav"))
         data["ke_rot"][:] = ke_mean_rot
+        data["ke_rot"].long_name = \
+            "rot(u) component of kinetic energy spectrum"
         data.createVariable("ke_div", "f4", ("nwav"))
         data["ke_div"][:] = ke_mean_div
+        data["ke_div"].long_name = \
+            "div(u) component of kinetic energy spectrum"
 
     plt.figure()
     plt.loglog(bins[4:-1], ke_mean_tot[4:-1], 
