@@ -139,13 +139,3 @@ def rhs_all_u(mesh, mats, flow, cnfg, hh_cell, uu_edge, uu_tend):
 
     return uu_tend
 
-
-try:
-    # load cython kernels, if compiled
-    from _kt import _set_x_vec as set_x_vec
-    from _kt import _cpy_x_vec as cpy_x_vec
-    
-except ImportError:
-    raise RuntimeError("Cython back-end not found")
-
-

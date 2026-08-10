@@ -1,5 +1,4 @@
 setuptools
-cython
 numpy
 scipy
 xarray

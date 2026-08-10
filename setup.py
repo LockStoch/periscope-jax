@@ -6,67 +6,7 @@ from setuptools import setup
 from setuptools.extension import Extension
 import numpy as np
 
-EXT_MODULES = []
-
-if   ("linux" in platform.system().lower()):
-
-    print("*Compiling for Linux")
-    COMPILE_ARGS = [
-        "-O3", "-flto", "-fopenmp", "-ffast-math", 
-            "-fno-finite-math-only", "-march=native"]
-    LINKER_ARGS = [
-        "-O3", "-flto", "-fopenmp", "-ffast-math", 
-            "-fno-finite-math-only", "-march=native"]
-
-elif ("darwin" in platform.system().lower()):
-
-    print("*Compiling for MacOS")
-    COMPILE_ARGS = [
-        "-O3", "-flto", "-fopenmp", "-ffast-math", 
-            "-Xclang", "-fno-finite-math-only"]
-    LINKER_ARGS = [
-        "-O3", "-flto", "-lomp", "-ffast-math", 
-            "-fno-finite-math-only"]
-
-elif ("win" in platform.system.lower()):
-
-    print("*Compiling for Windows")
-    COMPILE_ARGS = [
-        "/Ox", "/GS-", 
-        "/GL", "/LTCG", "/openmp:llvm", "/fp:fast"]
-    LINKER_ARGS = [
-        "/Ox", "/GS-", 
-        "/GL", "/LTCG", "/openmp:llvm", "/fp:fast"]
-        
-else:
-
-    print("*Unknown operating system")
-
 HERE = os.path.abspath(os.path.dirname(__file__))
-
-try:
-    from Cython.Build import cythonize
-    import Cython.Compiler.Options
-    
-    Cython.Compiler.Options.annotate = True
-    
-    EXT_MODULES += cythonize(Extension(
-        "_kt",
-        sources=[os.path.join(HERE, "_kt.pyx")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()]),
-        annotate=True
-    )
-
-except ImportError:
-    EXT_MODULES += [Extension(
-        "_kt",
-        sources=[os.path.join(HERE, "_kt.c")],
-        extra_compile_args=COMPILE_ARGS,
-        extra_link_args=LINKER_ARGS,
-        include_dirs=[np.get_include()])
-    ]
 
 NAME = "PERISCOPE"
 DESCRIPTION = "Geophysical fluid dynamics across scales"

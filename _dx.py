@@ -169,7 +169,9 @@ def tend_upgf(mesh, mats, cnfg, hh_cell, zb_cell,
 
     ttic = time.time()
 
-    uu_tend+= mats.edge_grad_norm * (zb_cell + hh_cell)
+    zt_cell = zb_cell + hh_cell
+
+    uu_tend+= gravity * (mats.edge_grad_norm * zt_cell)
         
     ttoc = time.time()
     tcpu.tend_upgf = tcpu.tend_upgf + (ttoc - ttic)

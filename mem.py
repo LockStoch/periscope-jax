@@ -16,41 +16,9 @@ from _fp import utend_t, htend_t, qtend_t
 class base: pass
 variables = base()
 
-ALIGNMENT = 64  # byte alignment of arrays
-
-VERT_SIZE = 4   # number of vec's in pools
-EDGE_SIZE = 4
-CELL_SIZE = 4
-vert_pool = []
-edge_pool = []
-cell_pool = []
-
-def _aligned(shape, align, dtype):
-#-- aligned alloc. for raw arrays
-    dtype = np.dtype(dtype)
-    nbyte = np.prod(shape) * dtype.itemsize
-    array = np.empty(nbyte + align, dtype=np.uint8)
-    start = align - (array.ctypes.data % align)
-    return array[start:start + nbyte].view(dtype).reshape(shape)
-
-def _allocate(cnfg, size, kind):
-#-- parallel alloc. & fill, for NUMA residence
-    return set_x_vec(
-        cnfg, _aligned(size, align=ALIGNMENT, dtype=kind), +0.0)
+def _allocate(cnfg, size, kind): return np.zeros(size, dtype=kind)
 
 def init_pool(cnfg, mesh):
-    for i in range(VERT_SIZE):
-        vert_pool.append(
-            _allocate(cnfg, mesh.vert.size, kind=reals_t))
-            
-    for i in range(EDGE_SIZE):
-        edge_pool.append(
-            _allocate(cnfg, mesh.edge.size, kind=reals_t))
-            
-    for i in range(CELL_SIZE):
-        cell_pool.append(
-            _allocate(cnfg, mesh.cell.size, kind=reals_t))
-    
     variables.is_zero = \
             _allocate(cnfg, mesh._max_size, kind=reals_t)
 
@@ -228,35 +196,4 @@ def init_pool(cnfg, mesh):
     variables.Xi_self = \
             _allocate(cnfg, mesh.cell.size, kind=reals_t)
 
-def get_vec_v():
-    if (len(vert_pool) > 0):
-        return vert_pool.pop()
-    else:
-        raise RuntimeError("Pool exhausted: verts")
-        
-def put_vec_v(vec): vert_pool.append(vec)
-
-def get_vec_e():
-    if (len(edge_pool) > 0):
-        return edge_pool.pop()
-    else:
-        raise RuntimeError("Pool exhausted: edges")
-        
-def put_vec_e(vec): edge_pool.append(vec)
-
-def get_vec_c():
-    if (len(cell_pool) > 0):
-        return cell_pool.pop()
-    else:
-        raise RuntimeError("Pool exhausted: cells")
-        
-def put_vec_c(vec): cell_pool.append(vec)
-
-try:
-    # load cython kernels, if compiled
-    from _kt import _set_x_vec as set_x_vec
-    from _kt import _cpy_x_vec as cpy_x_vec
-
-except ImportError:
-    raise RuntimeError("Cython back-end not found")
 
