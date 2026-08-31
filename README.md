@@ -23,20 +23,20 @@ A staggered, unstructured mesh mimetic finite-volume / difference discretisation
 is employed that maintains the energy (and to a lesser extent enstrophy) balances 
 associated with geophysical flows.
 
-`PERISCOPE` is implemented using a mix of `Python` and `Cython` and must first be 
-compiled:
-
-    python setup.py build_ext --inplace
-
 One way to install the various dependencies needed is via `conda`:
 
     conda create --name periscope-utils python=X.Y
     conda activate periscope-utils
     pip install -r requirements.txt
 
-While not currently intended for massively parallel HPC workflows, `PERISCOPE` is
-written to exploit thread-based parallelism via `OpenMP` and is well suited to run 
-on single-node systems.
+`pip install -r requirements.txt` installs the CPU build of `jax`. To run on a
+GPU, follow up with the appropriate CUDA/ROCm wheel for your system, e.g.:
+
+    pip install -U "jax[cuda12]"
+
+The (presently reduced, PGF + continuity) solver core is implemented in `JAX`
+and runs on CPU or GPU via the same code path -- no separate build step is
+required.
 
 To run the shallow-water solver (see `swe.py --help`):
 

@@ -1,7 +1,9 @@
 
 import time
+from typing import NamedTuple
 import numpy as np
 from scipy.sparse import csr_matrix, spdiags
+import jax.numpy as jnp
 
 from _fp import flt32_t, flt64_t
 from _fp import reals_t, index_t
@@ -14,6 +16,74 @@ from mat import inv_3x3
 #-- Darren Engwirda
 #-- d.engwirda@gmail.com
 #-- https://github.com/dengwirda/
+
+def csr_to_gather(csr, pad=None):
+#-- convert a scipy sparse operator to a dense, padded "gather"
+#-- form suited to JAX/GPU: row r's sparse entries become
+#-- idx[r, :], wgt[r, :], padded with (0, 0.) so that
+#-- (take(field, idx) * wgt).sum(-1) reproduces csr * field.
+
+    csr = csr.tocsr()
+
+    nrow = csr.shape[0]
+    cnnz = np.diff(csr.indptr)
+    kmax = int(cnnz.max()) if pad is None else pad
+
+    ridx = np.repeat(np.arange(nrow), cnnz)
+    rpos = np.arange(csr.indices.size) - csr.indptr[ridx]
+
+    idx = np.zeros((nrow, kmax), dtype=index_t)
+    wgt = np.zeros((nrow, kmax), dtype=reals_t)
+
+    idx[ridx, rpos] = csr.indices
+    wgt[ridx, rpos] = csr.data
+
+    return idx, wgt
+
+
+def gather_apply(idx, wgt, field):
+#-- apply a "gathered" operator (idx, wgt) built via csr_to_gather
+#-- to FIELD: equivalent to the original csr_matrix * field product.
+
+    return jnp.sum(jnp.take(field, idx, axis=0) * wgt, axis=-1)
+
+
+class JaxOps(NamedTuple):
+#-- jax-ready "gather" forms of the operators needed by the
+#-- (presently reduced) PGF + continuity physics in _dx.py, plus the
+#-- geometric weights they're normalised by. A plain NamedTuple so it's
+#-- a valid pytree and can be passed straight into jax.jit/lax.scan.
+
+    div_idx:   jnp.ndarray
+    div_wgt:   jnp.ndarray
+    grad_idx:  jnp.ndarray
+    grad_wgt:  jnp.ndarray
+    wing_idx:  jnp.ndarray
+    wing_wgt:  jnp.ndarray
+    cell_area: jnp.ndarray
+    edge_area: jnp.ndarray
+
+
+def to_jax(mats, mesh):
+#-- build the JaxOps bundle and attach it to MATS as MATS.jx
+
+    div_idx, div_wgt = csr_to_gather(mats.cell_flux_sums)
+    grad_idx, grad_wgt = csr_to_gather(mats.edge_grad_norm)
+    wing_idx, wing_wgt = csr_to_gather(mats.edge_wing_sums)
+
+    mats.jx = JaxOps(
+        div_idx=jnp.asarray(div_idx),
+        div_wgt=jnp.asarray(div_wgt, dtype=reals_t),
+        grad_idx=jnp.asarray(grad_idx),
+        grad_wgt=jnp.asarray(grad_wgt, dtype=reals_t),
+        wing_idx=jnp.asarray(wing_idx),
+        wing_wgt=jnp.asarray(wing_wgt, dtype=reals_t),
+        cell_area=jnp.asarray(mesh.cell.area, dtype=reals_t),
+        edge_area=jnp.asarray(mesh.edge.area, dtype=reals_t),
+    )
+
+    return mats
+
 
 def operators(mesh):
     """
@@ -190,7 +260,16 @@ def operators(mesh):
    
     ttoc = time.time()
     print("-RECO done (sec):", round(ttoc - ttic, 2))
-   
+
+    ttic = time.time()
+
+    # jax-ready "gather" forms of the operators used by the
+    # (presently reduced) PGF + continuity physics -- mats.jx
+    mats = to_jax(mats, mesh)
+
+    ttoc = time.time()
+    print("-JAX_. done (sec):", round(ttoc - ttic, 2))
+
     return mats
 
 

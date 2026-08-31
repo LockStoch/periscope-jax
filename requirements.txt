@@ -5,3 +5,4 @@ xarray
 netcdf4
 meson
 matplotlib
+jax

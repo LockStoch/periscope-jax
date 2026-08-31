@@ -17,6 +17,8 @@ from log import tcpu
 
 from mem import variables
 
+from ops import gather_apply
+
 def calc_vars(mesh, mats, flow, cnfg, hh_cell, uu_edge,
                                       qq_cell):
 
@@ -88,15 +90,17 @@ def calc_vars(mesh, mats, flow, cnfg, hh_cell, uu_edge,
            Xi_tide, Xi_self
 
 
-def invariant(mesh, mats, flow, cnfg, hh_cell, uu_edge,
-                                      qq_cell):
+def invariant(mesh, hh_cell, uu_edge):
 
-#-- compute the discrete energy and enstrophy invariant
+#-- compute basic scalar diagnostics for the reduced (PGF +
+#-- continuity) physics: total volume (should be conserved by
+#-- the flux-form continuity scheme up to boundary effects) and
+#-- domain rms thickness (a bounded-ness sanity check).
 
-    kp_sums = 0.0
-    pv_sums = 0.0
+    kp_sums = np.sum(hh_cell * mesh.cell.area)
+    hr_sums = np.sqrt(np.mean(hh_cell ** 2))
 
-    return kp_sums, pv_sums
+    return kp_sums, hr_sums
 
 
 def calc_hmap(mesh, mats, cnfg, 
@@ -141,40 +145,32 @@ def calc_perp(mesh, mats, cnfg, uu_edge):
     return vv_edge
               
               
-def tend_hadv(mesh, mats, cnfg, hh_edge, hh_cell, 
-                                uu_edge,
-                                gravity, 
-                                hh_tend):
+def tend_hadv(ops, hh_cell, uu_edge, hh_tend):
 
-#-- div. for thickness flux
+#-- div. for thickness flux -- JAX, GPU-resident, called from the
+#-- jit-compiled RK step in _dt.py. OPS is an ops.JaxOps bundle
+#-- (see ops.to_jax); replaces calc_hmap's edge-remap + the old
+#-- csr-matrix divergence with padded-gather equivalents.
 
-    ttic = time.time()
+    hh_edge = gather_apply(
+        ops.wing_idx, ops.wing_wgt, hh_cell) / ops.edge_area
 
     uh_flux = uu_edge * hh_edge
 
-    hh_tend+=(mats.cell_flux_sums * uh_flux) / mesh.cell.area
-
-    ttoc = time.time()
-    tcpu.tend_hadv = tcpu.tend_hadv + (ttoc - ttic)
+    hh_tend = hh_tend + gather_apply(
+        ops.div_idx, ops.div_wgt, uh_flux) / ops.cell_area
 
     return hh_tend
-    
-    
-def tend_upgf(mesh, mats, cnfg, hh_cell, zb_cell,
-                                gravity,
-                                xi_self,  
-                                uu_tend):
 
-#-- get z pressure gradient
 
-    ttic = time.time()
+def tend_upgf(ops, hh_cell, zb_cell, gravity, uu_tend):
+
+#-- get z pressure gradient -- JAX, GPU-resident, see tend_hadv above.
 
     zt_cell = zb_cell + hh_cell
 
-    uu_tend+= gravity * (mats.edge_grad_norm * zt_cell)
-        
-    ttoc = time.time()
-    tcpu.tend_upgf = tcpu.tend_upgf + (ttoc - ttic)
+    uu_tend = uu_tend + gravity * gather_apply(
+        ops.grad_idx, ops.grad_wgt, zt_cell)
 
     return uu_tend
 
