@@ -15,11 +15,11 @@ if [ ! -n "${PYTHON+z}" ]; then PYTHON="python3" ; fi
 if [ ! -n "${SCHEME+z}" ]; then SCHEME="RK43-FB" ; fi
 
 # NB: deliberately not using taskset to re-pin CPU affinity here.
-# Under SLURM with shared node access, the job's cgroup-assigned CPU
-# IDs don't necessarily start at 0, so a hardcoded 0-N range can fall
-# entirely outside what the job is actually allowed to use. SLURM's
-# cgroup already restricts this job correctly on its own -- OMP_PLACES
-# / OMP_PROC_BIND below handle thread placement within that.
+# Job schedulers already restrict a job to its allotted CPUs; a
+# hardcoded 0-N range assumes those IDs start at 0, which isn't
+# guaranteed (e.g. under shared-node scheduling, a job can land on
+# any slice of a node's CPUs). OMP_PLACES/OMP_PROC_BIND below handle
+# thread placement within whatever the scheduler already grants.
 RUNNER=""
 
 export OMP_PLACES=cores
