@@ -13,6 +13,7 @@ fi
 
 if [ ! -n "${PYTHON+z}" ]; then PYTHON="python3" ; fi
 if [ ! -n "${SCHEME+z}" ]; then SCHEME="RK33-FB" ; fi
+if [ ! -n "${SOLNFILE+z}" ]; then SOLNFILE="" ; fi
 
 if command -v taskset >/dev/null 2>&1; then
   RUNNER="taskset --cpu-list 0-$((NUMCPU-1))"
@@ -26,6 +27,7 @@ then
 
   opts=(
     --mesh-file=${MSHDIR}/"jet_cvt_7.nc"
+    --soln-file=${SOLNFILE}
     --numthread=${NUMCPU}
     --integrate=${SCHEME}
     --time-step="60" --time-span="6d" --save-time="1d" --stat-time="1d"
