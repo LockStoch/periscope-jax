@@ -15,9 +15,13 @@ if [ ! -n "${PYTHON+z}" ]; then PYTHON="python3" ; fi
 if [ ! -n "${SCHEME+z}" ]; then SCHEME="RK33-FB" ; fi
 if [ ! -n "${SOLNFILE+z}" ]; then SOLNFILE="" ; fi
 
-if command -v taskset >/dev/null 2>&1; then
-  RUNNER="taskset --cpu-list 0-$((NUMCPU-1))"
-fi
+# NB: deliberately not using taskset to re-pin CPU affinity here.
+# Under SLURM with shared node access, the job's cgroup-assigned CPU
+# IDs don't necessarily start at 0, so a hardcoded 0-N range can fall
+# entirely outside what the job is actually allowed to use. SLURM's
+# cgroup already restricts this job correctly on its own -- OMP_PLACES
+# / OMP_PROC_BIND below handle thread placement within that.
+RUNNER=""
 
 export OMP_PLACES=cores
 export OMP_PROC_BIND=true
