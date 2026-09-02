@@ -15,7 +15,7 @@ if [ ! -n "${PYTHON+z}" ]; then PYTHON="python3" ; fi
 if [ ! -n "${SCHEME+z}" ]; then SCHEME="RK43-FB" ; fi
 
 if command -v taskset >/dev/null 2>&1; then
-  RUNNER="taskset --cpu-list 0-${NUMCPU}"
+  RUNNER="taskset --cpu-list 0-$((NUMCPU-1))"
 fi
 
 export OMP_PLACES=cores
