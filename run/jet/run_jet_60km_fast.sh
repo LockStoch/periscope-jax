@@ -28,7 +28,7 @@ then
     --mesh-file=${MSHDIR}/"jet_cvt_7.nc"
     --numthread=${NUMCPU}
     --integrate=${SCHEME}
-    --time-span="3d" --save-time="1d" --stat-time="1d"
+    --time-step="60" --time-span="3d" --save-time="1d" --stat-time="1d"
   )
 
   ${RUNNER} ${PYTHON} ${BINDIR}/swe.py "${opts[@]}"
