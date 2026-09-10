@@ -1,6 +1,4 @@
 
-import time
-import math
 import numpy as np
 import jax.numpy as jnp
 
@@ -13,8 +11,6 @@ import jax.numpy as jnp
 
 from _fp import flt32_t, flt64_t
 from _fp import reals_t, index_t
-
-from log import tcpu
 
 from mem import variables
 
@@ -36,13 +32,19 @@ def calc_vars(mesh, mats, flow, cnfg, hh_cell, uu_edge,
 
     zb_cell = variables.zb_cell
 
-    gravity = flow.gravity
+    # host-side call into the same pure-JAX calc_perp/calc_hmap used
+    # by the RK hot path (rhs.py) -- jax.numpy ops accept plain numpy
+    # input directly, so this works fine eagerly (un-jitted) on the
+    # numpy state io_.py has already pulled back from device.
+    ops = mats.jx
 
-    vv_edge = calc_perp(mesh, mats, cnfg, uu_edge)
+    vv_edge = np.asarray(calc_perp(ops, uu_edge))
 
-    hh_dual, hh_edge, hh_quad, hh_bias = calc_hmap(
-        mesh, mats, cnfg, 
-        gravity, hh_cell, uu_edge, vv_edge)
+    hh_dual, hh_edge, hh_quad = calc_hmap(ops, hh_cell)
+    hh_dual = np.asarray(hh_dual)
+    hh_edge = np.asarray(hh_edge)
+
+    hh_bias = variables.hh_bias  # not computed -- CENTRE scheme only
 
     """
     ke_cell, ke_bias = calc_u_ke(
@@ -104,68 +106,17 @@ def invariant(mesh, hh_cell, uu_edge):
     return kp_sums, hr_sums
 
 
-def calc_hmap(mesh, mats, cnfg, 
-        gravity, hh_cell, uu_edge, vv_edge):
-
-#-- compute discrete thickness
-
-    ttic = time.time()
-    
-    hh_dual = variables.hh_dual
-    hh_edge = variables.hh_edge
-    hh_quad = variables.hh_quad
-    hh_bias = variables.hh_bias
-
-    hh_dual[:] = mats.dual_kite_sums * hh_cell
-    hh_dual[:]/= mesh.vert.area
-
-    hh_edge[:] = mats.edge_wing_sums * hh_cell
-    hh_edge[:]/= mesh.edge.area
-
-    # don't worry about hh_quad or hh_bias for now
-
-    ttoc = time.time()
-    tcpu.calc_hmap = tcpu.calc_hmap + (ttoc - ttic)
-
-    return hh_dual, hh_edge, hh_quad, hh_bias
-              
-              
-def calc_perp(mesh, mats, cnfg, uu_edge):
-
-#-- get tangential velocity
-
-    ttic = time.time()
-
-    vv_edge = variables.vv_edge
-
-    vv_edge[:] = mats.edge_lsqr_perp * uu_edge
-
-    ttoc = time.time()
-    tcpu.calc_perp = tcpu.calc_perp + (ttoc - ttic)
-
-    return vv_edge
-              
-              
-def calc_hh_edge(ops, hh_cell):
-
-#-- cell-to-edge thickness remap -- JAX, GPU-resident. Reused by both
-#-- tend_hadv (continuity) and the Stage 1 advection terms below.
-#-- This is the CENTRE-scheme formula (main's calc_hmap, hh_scheme ==
-#-- "CENTRE" branch); the reduced physics here doesn't implement the
-#-- UPWIND thickness-blend branch main defaults to, matching the
-#-- simplification tend_hadv already made for continuity.
-
-    return gather_apply(ops.wing, hh_cell) / ops.edge_area
-
-
 def tend_hadv(ops, hh_cell, uu_edge, hh_tend):
 
 #-- div. for thickness flux -- JAX, GPU-resident, called from the
 #-- jit-compiled RK step in _dt.py. OPS is an ops.JaxOps bundle
-#-- (see ops.to_jax); replaces calc_hmap's edge-remap + the old
-#-- csr-matrix divergence with padded-gather equivalents.
+#-- (see ops.to_jax). hh_edge recomputed here via the same formula
+#-- calc_hmap uses below (cell_wing remap) rather than threaded in as
+#-- a shared precomputed value -- main computes it once per RK stage
+#-- via rhs_all_d and reuses it across tend_hadv/tend_uadv, this port
+#-- doesn't have that precompute stage (see calc_hmap's docstring).
 
-    hh_edge = calc_hh_edge(ops, hh_cell)
+    hh_edge = gather_apply(ops.wing, hh_cell) / ops.edge_area
 
     uh_flux = uu_edge * hh_edge
 
