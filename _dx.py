@@ -199,33 +199,43 @@ def tend_upgf(ops, hh_cell, zb_cell, gravity, uu_tend):
 #--
 #-- Config knobs baked in at their swe.py defaults (not threaded
 #-- through as CLI flags, consistent with the rest of this reduced
-#-- port): hh_scheme=CENTRE (see calc_hh_edge/calc_hh_quad above),
-#-- ke_weight=1.0 + ke_method=1.0 (pure cell-wing KE remap, no
-#-- dual-blend term), wetdry_h0=0.0 (its swe.py default; the KE
-#-- wet-dry factor below still applies since it doesn't vanish at
-#-- wetdry_h0=0, it's a genuine hh_cell/hh_quad ratio correction).
+#-- port): hh_scheme=CENTRE (see calc_hmap below), ke_weight=1.0 +
+#-- ke_method=1.0 (pure cell-wing KE remap, no dual-blend term),
+#-- wetdry_h0=0.0 (its swe.py default; the KE wet-dry factor below
+#-- still applies since it doesn't vanish at wetdry_h0=0, it's a
+#-- genuine hh_cell/hh_quad ratio correction).
+#--
+#-- Function names/boundaries below match main's _dx.py one-for-one
+#-- (calc_hmap, calc_perp, calc_u_ke, _build_pv, upwinding, calc_u_pv,
+#-- tend_uadv) so this stays directly comparable to the original --
+#-- see the per-function notes for the (documented) signature/scope
+#-- reductions each one makes relative to main.
 
-def calc_hh_dual(ops, hh_cell):
+def calc_hmap(ops, hh_cell):
 
-#-- cell-to-dual thickness remap
+#-- compute discrete thickness -- main's calc_hmap/_calc_hmap,
+#-- CENTRE-scheme branch only (hh_scheme's swe.py default is UPWIND;
+#-- this reduced port only implements CENTRE, matching the
+#-- simplification tend_hadv already made for continuity). Main's
+#-- signature also takes gravity/uu_edge/vv_edge and returns a 4th
+#-- value, hh_bias -- both only relevant to the UPWIND wave-speed
+#-- blend, dropped here since that branch isn't implemented.
 
-    return gather_apply(ops.dual_kite, hh_cell) / ops.dual_area
+    hh_dual = gather_apply(ops.dual_kite, hh_cell) / ops.dual_area
+    hh_edge = gather_apply(ops.wing, hh_cell) / ops.edge_area
+
+    # PV "quad" point: Simpson's-rule blend of the edge value and its
+    # two neighbouring duals.
+    hh_quad = (4.0 * hh_edge + gather_apply(ops.edge_vert, hh_dual)) / 6.0
+
+    return hh_dual, hh_edge, hh_quad
 
 
-def calc_hh_quad(ops, hh_edge, hh_dual):
-
-#-- thickness at the PV "quad" point -- Simpson's-rule blend of the
-#-- edge value and its two neighbouring duals (main's calc_hmap,
-#-- CENTRE-scheme branch).
-
-    return (4.0 * hh_edge + gather_apply(ops.edge_vert, hh_dual)) / 6.0
-
-
-def calc_vv_edge(ops, uu_edge):
+def calc_perp(ops, uu_edge):
 
 #-- tangential (perpendicular) velocity reconstruction -- main's
-#-- calc_perp, LSQR form. (mesh.edge.perp wall-factor omitted, see
-#-- note above -- it's 1 everywhere for the jet mesh.)
+#-- calc_perp/_calc_perp, LSQR form. (mesh.edge.perp wall-factor
+#-- omitted, see note above -- it's 1 everywhere for the jet mesh.)
 
     return gather_apply(ops.edge_perp, uu_edge)
 
@@ -252,15 +262,18 @@ def calc_u_ke(ops, hh_cell, hh_quad, uu_edge, vv_edge):
     return ke_cell
 
 
-def calc_u_pv(ops, uu_edge, ff_dual, ff_edge, ff_cell):
+def _build_pv(ops, uu_edge, ff_dual, ff_edge, ff_cell):
 
-#-- relative + absolute (pv = rv + f) vorticity, remapped to every
-#-- staggering the upwind blend below needs -- main's
-#-- calc_u_pv/_build_pv, pre-upwinding portion. Returns pv_dual,
-#-- pv_wide, pv_cell (dual/dual-Gassmann-widened/cell centred) plus
-#-- pv_edge_ctr, the centred (non-upwinded) edge estimate that main's
-#-- upwinding() blends against pv_wide/pv_dual/pv_cell to get the
-#-- final, upwind-biased pv_edge.
+#-- compute discrete vorticity -- main's private _build_pv (in
+#-- _dx.py, wraps the Cython _calc_u_pv kernel), the pre-upwinding
+#-- portion of PV. Returns pv_dual, pv_wide, pv_cell (dual /
+#-- dual-Gassmann-widened / cell centred) plus pv_edge_ctr, the
+#-- centred (non-upwinded) edge estimate that upwinding() below blends
+#-- against pv_wide/pv_dual/pv_cell to get the final pv_edge. Main
+#-- also returns rv_dual/rv_wide/rv_cell (relative vorticity, pre-+f)
+#-- and a pv_rms_ scalar -- rv_* dropped here since nothing downstream
+#-- needs them on their own, pv_rms_ is recomputed inline by
+#-- upwinding() below instead of threaded through.
 
     rv_dual = gather_apply(ops.dual_curl, uu_edge) / ops.dual_area
     pv_dual = rv_dual + ff_dual
@@ -286,14 +299,19 @@ PV_UPWIND = 1.0000   # cnfg default (--pv-upwind); AUST-adapt bias scale
 UP_TINY_  = 1.0E-02  # hardcoded floor inside main's _upwinding (kx.pyx)
 
 
-def calc_pv_edge(ops, pv_dual, pv_wide, pv_cell, pv_edge_ctr,
-                  uu_edge, vv_edge, pv_tiny, uu_tiny):
+def upwinding(ops, pv_wide, pv_dual, pv_cell, pv_edge_ctr,
+              uu_edge, vv_edge, pv_tiny, uu_tiny):
 
-#-- upwind-biased edge PV -- main's upwinding(), AUST-adapt branch
-#-- (cnfg.pv_scheme default). Blends the centred estimate pv_edge_ctr
-#-- against an upwind correction sized by how much pv disagrees across
-#-- the two duals either side of the edge (up_sum_edge), scaled by the
-#-- local PV gradient (dN_edge/dP_edge) and a smooth 0-1 limiter.
+#-- upwind-biased edge PV -- main's upwinding()/_upwinding, AUST-adapt
+#-- branch only (cnfg.pv_scheme's swe.py default; the AUST-const/APVM/
+#-- CENTRE branches aren't implemented). Blends the centred estimate
+#-- pv_edge_ctr against an upwind correction sized by how much pv
+#-- disagrees across the two duals either side of the edge
+#-- (up_sum_edge), scaled by the local PV gradient (dN_edge/dP_edge)
+#-- and a smooth 0-1 limiter. Main also takes cnfg.pv_scheme/
+#-- cnfg.pv_upwind and an up_tiny kwarg -- pv_scheme is implicit here
+#-- (only this branch exists), pv_upwind/up_tiny are the PV_UPWIND/
+#-- UP_TINY_ module constants above (both cnfg defaults).
 
     dN_edge = gather_apply(ops.grad, pv_cell)
     dP_edge = gather_apply(ops.grad_perp, pv_dual)
@@ -324,6 +342,26 @@ def calc_pv_edge(ops, pv_dual, pv_wide, pv_cell, pv_edge_ctr,
     return pv_edge
 
 
+def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
+              pv_tiny, uu_tiny):
+
+#-- compute potential (absolute) vorticity -- main's calc_u_pv:
+#-- orchestrates _build_pv (raw pv at every staggering) then
+#-- upwinding() (the AUST-adapt blend), returning the final
+#-- upwind-biased pv_edge. Main also returns rv_dual/pv_dual/rv_wide/
+#-- pv_wide/rv_cell/pv_cell/pv_bias for diagnostics -- dropped here
+#-- since tend_uadv (the only caller) only needs the final pv_edge.
+
+    pv_dual, pv_wide, pv_cell, pv_edge_ctr = _build_pv(
+        ops, uu_edge, ff_dual, ff_edge, ff_cell)
+
+    pv_edge = upwinding(
+        ops, pv_wide, pv_dual, pv_cell, pv_edge_ctr,
+        uu_edge, vv_edge, pv_tiny, uu_tiny)
+
+    return pv_edge
+
+
 PV_WEIGHT = 0.1000  # cnfg default (--pv-weight): linear/nonlinear PV split
 
 
@@ -331,7 +369,7 @@ def tend_uadv(ops, hh_edge, hh_quad, uu_edge, pv_edge, ke_cell,
               ff_edge, uu_tend):
 
 #-- energy-neutral momentum advection: KE-gradient + PV-flux, Coriolis
-#-- already fused into pv_edge upstream (calc_pv_edge above) -- main's
+#-- already fused into pv_edge upstream (calc_u_pv above) -- main's
 #-- tend_uadv/_tend_uadv. ff_dual/ff_cell aren't used by this term in
 #-- main either, only ff_edge (re-splitting out the linear pv_weight
 #-- share for the energy-neutral perp-flux average). Main also gates
