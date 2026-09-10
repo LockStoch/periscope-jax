@@ -159,6 +159,15 @@ def swe(cnfg):
     zb_cell = jnp.asarray(flow.zb_cell, dtype=reals_t)
     fb_weight = jnp.asarray(cnfg.fb_weight, dtype=reals_t)
 
+    # Coriolis (Stage 1: momentum advection) -- computed once by
+    # pre() above, already masked by --no-rotate there
+    ff_dual = jnp.asarray(_var.ff_vert, dtype=reals_t)
+    ff_edge = jnp.asarray(_var.ff_edge, dtype=reals_t)
+    ff_cell = jnp.asarray(_var.ff_cell, dtype=reals_t)
+
+    uu_tiny = float(cnfg.uu_tiny)
+    pv_tiny = float(cnfg.pv_tiny)
+
     nsteps = int(cnfg.iteration)
     save_freq = int(cnfg.save_freq)
     stat_freq = int(cnfg.stat_freq)
@@ -215,7 +224,8 @@ def swe(cnfg):
         take = min(chunk, nsteps - step)
 
         state = run_scan(
-            mats.jx, gravity, zb_cell, fb_weight, dt,
+            mats.jx, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
+            uu_tiny, pv_tiny, fb_weight, dt,
                                         state, take)
 
         step+= take
@@ -259,9 +269,8 @@ def rdf(xval, yval):
 def pre(mesh, mats, flow, cnfg):
 #-- do various init. ops for flow + config. at pre-run
 
-    # remap coriolis onto msh DoFs -- unused by the current
-    # reduced (PGF + continuity) physics, kept as groundwork for
-    # re-introducing rotation later
+    # remap coriolis onto msh DoFs -- consumed by Stage 1's
+    # momentum-advection term (calc_u_pv/tend_uadv in _dx.py)
     flow.ff_edge = mats.edge_tail_sums*flow.ff_vert
     flow.ff_edge/= mesh.edge.area
 

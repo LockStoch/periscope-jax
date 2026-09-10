@@ -41,45 +41,78 @@ def csr_to_gather(csr, pad=None):
     return idx, wgt
 
 
-def gather_apply(idx, wgt, field):
-#-- apply a "gathered" operator (idx, wgt) built via csr_to_gather
-#-- to FIELD: equivalent to the original csr_matrix * field product.
+def gather_apply(op, field):
+#-- apply a GatherOp to FIELD: equivalent to the original
+#-- csr_matrix * field product.
 
-    return jnp.sum(jnp.take(field, idx, axis=0) * wgt, axis=-1)
+    return jnp.sum(jnp.take(field, op.idx, axis=0) * op.wgt, axis=-1)
+
+
+class GatherOp(NamedTuple):
+#-- a single sparse operator in padded-gather form: row r's neighbour
+#-- indices/weights, padded so (take(field, idx) * wgt).sum(-1)
+#-- reproduces the original csr_matrix * field product. A plain
+#-- NamedTuple so it's a valid pytree on its own or nested in JaxOps.
+
+    idx: jnp.ndarray
+    wgt: jnp.ndarray
+
+
+def gather_op(csr, pad=None):
+#-- build a GatherOp from a scipy sparse operator
+
+    idx, wgt = csr_to_gather(csr, pad=pad)
+    return GatherOp(idx=jnp.asarray(idx), wgt=jnp.asarray(wgt, dtype=reals_t))
 
 
 class JaxOps(NamedTuple):
-#-- jax-ready "gather" forms of the operators needed by the
-#-- (presently reduced) PGF + continuity physics in _dx.py, plus the
-#-- geometric weights they're normalised by. A plain NamedTuple so it's
-#-- a valid pytree and can be passed straight into jax.jit/lax.scan.
+#-- jax-ready "gather" forms of the operators needed by the physics in
+#-- _dx.py, plus the geometric weights they're normalised by. A plain
+#-- NamedTuple-of-GatherOps so it's a valid pytree and can be passed
+#-- straight into jax.jit/lax.scan.
 
-    div_idx:   jnp.ndarray
-    div_wgt:   jnp.ndarray
-    grad_idx:  jnp.ndarray
-    grad_wgt:  jnp.ndarray
-    wing_idx:  jnp.ndarray
-    wing_wgt:  jnp.ndarray
-    cell_area: jnp.ndarray
-    edge_area: jnp.ndarray
+    div:        GatherOp  # cell_flux_sums:  edge flux -> cell div.
+    grad:       GatherOp  # edge_grad_norm:  cell field -> edge grad.
+    grad_perp:  GatherOp  # edge_grad_perp:  dual field -> edge grad.
+    wing:       GatherOp  # edge_wing_sums:  cell -> edge remap
+    dual_kite:  GatherOp  # dual_kite_sums:  cell -> dual remap
+    dual_tail:  GatherOp  # dual_tail_sums:  edge -> dual remap
+    dual_curl:  GatherOp  # dual_curl_sums:  edge -> dual curl
+    dual_edge:  GatherOp  # dual_edge_sums:  edge -> dual average
+    edge_vert:  GatherOp  # edge_vert_sums:  dual -> edge average
+    cell_wing:  GatherOp  # cell_wing_sums:  edge -> cell remap
+    cell_kite:  GatherOp  # cell_kite_sums:  dual -> cell remap
+    edge_cell:  GatherOp  # edge_cell_sums:  cell -> edge average
+    edge_perp:  GatherOp  # edge_lsqr_perp:  edge norm -> edge perp
+    flux_perp:  GatherOp  # edge_flux_perp:  perp flux reconstruction
+    cell_area:  jnp.ndarray
+    edge_area:  jnp.ndarray
+    dual_area:  jnp.ndarray
+    quad_area:  jnp.ndarray
 
 
 def to_jax(mats, mesh):
 #-- build the JaxOps bundle and attach it to MATS as MATS.jx
 
-    div_idx, div_wgt = csr_to_gather(mats.cell_flux_sums)
-    grad_idx, grad_wgt = csr_to_gather(mats.edge_grad_norm)
-    wing_idx, wing_wgt = csr_to_gather(mats.edge_wing_sums)
-
     mats.jx = JaxOps(
-        div_idx=jnp.asarray(div_idx),
-        div_wgt=jnp.asarray(div_wgt, dtype=reals_t),
-        grad_idx=jnp.asarray(grad_idx),
-        grad_wgt=jnp.asarray(grad_wgt, dtype=reals_t),
-        wing_idx=jnp.asarray(wing_idx),
-        wing_wgt=jnp.asarray(wing_wgt, dtype=reals_t),
+        div=gather_op(mats.cell_flux_sums),
+        grad=gather_op(mats.edge_grad_norm),
+        grad_perp=gather_op(mats.edge_grad_perp),
+        wing=gather_op(mats.edge_wing_sums),
+        dual_kite=gather_op(mats.dual_kite_sums),
+        dual_tail=gather_op(mats.dual_tail_sums),
+        dual_curl=gather_op(mats.dual_curl_sums),
+        dual_edge=gather_op(mats.dual_edge_sums),
+        edge_vert=gather_op(mats.edge_vert_sums),
+        cell_wing=gather_op(mats.cell_wing_sums),
+        cell_kite=gather_op(mats.cell_kite_sums),
+        edge_cell=gather_op(mats.edge_cell_sums),
+        edge_perp=gather_op(mats.edge_lsqr_perp),
+        flux_perp=gather_op(mats.edge_flux_perp),
         cell_area=jnp.asarray(mesh.cell.area, dtype=reals_t),
         edge_area=jnp.asarray(mesh.edge.area, dtype=reals_t),
+        dual_area=jnp.asarray(mesh.vert.area, dtype=reals_t),
+        quad_area=jnp.asarray(mesh.quad.area, dtype=reals_t),
     )
 
     return mats
@@ -263,8 +296,9 @@ def operators(mesh):
 
     ttic = time.time()
 
-    # jax-ready "gather" forms of the operators used by the
-    # (presently reduced) PGF + continuity physics -- mats.jx
+    # jax-ready "gather" forms of the operators used by the physics
+    # in _dx.py (continuity, PGF, momentum advection + Coriolis) --
+    # mats.jx
     mats = to_jax(mats, mesh)
 
     ttoc = time.time()

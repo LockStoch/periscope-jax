@@ -7,6 +7,8 @@
 #-- https://github.com/dengwirda/
 
 from _dx import tend_hadv, tend_upgf
+from _dx import calc_hh_edge, calc_hh_dual, calc_hh_quad, calc_vv_edge, \
+                 calc_u_ke, calc_u_pv, calc_pv_edge, tend_uadv
 
 
 def rhs_slw_h(ops, hh_cell, uu_edge, hh_tend):
@@ -37,9 +39,30 @@ def rhs_all_h(ops, hh_cell, uu_edge, hh_tend):
     return hh_tend
 
 
-def rhs_slw_u(ops, hh_cell, uu_edge, uu_tend):
+def rhs_slw_u(ops, hh_cell, uu_edge,
+              ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend):
 
 #-- evaluate slow tendencies dU/dt = RHS(t,U,H)
+
+    # momentum advection + Coriolis (Stage 1)
+    hh_edge = calc_hh_edge(ops, hh_cell)
+    hh_dual = calc_hh_dual(ops, hh_cell)
+    hh_quad = calc_hh_quad(ops, hh_edge, hh_dual)
+
+    vv_edge = calc_vv_edge(ops, uu_edge)
+
+    ke_cell = calc_u_ke(ops, hh_cell, hh_quad, uu_edge, vv_edge)
+
+    pv_dual, pv_wide, pv_cell, pv_edge_ctr = calc_u_pv(
+        ops, uu_edge, ff_dual, ff_edge, ff_cell)
+
+    pv_edge = calc_pv_edge(
+        ops, pv_dual, pv_wide, pv_cell, pv_edge_ctr,
+        uu_edge, vv_edge, pv_tiny, uu_tiny)
+
+    uu_tend = tend_uadv(
+        ops, hh_edge, hh_quad, uu_edge, pv_edge, ke_cell,
+        ff_edge, uu_tend)
 
     return uu_tend
 
@@ -61,11 +84,14 @@ def rhs_pgf_u(ops, hh_cell, zb_cell, gravity, uu_tend):
     return uu_tend
 
 
-def rhs_all_u(ops, hh_cell, uu_edge, zb_cell, gravity, uu_tend):
+def rhs_all_u(ops, hh_cell, uu_edge, zb_cell, gravity,
+              ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend):
 
 #-- evaluate full tendencies dU/dt = RHS(t,U,H)
 
-    uu_tend = rhs_slw_u(ops, hh_cell, uu_edge, uu_tend)
+    uu_tend = rhs_slw_u(
+        ops, hh_cell, uu_edge,
+        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend)
 
     uu_tend = rhs_fst_u(ops, hh_cell, uu_edge, uu_tend)
 

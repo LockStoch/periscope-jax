@@ -77,7 +77,8 @@ def init_RKFB(cnfg):
 
 
 @jax.jit
-def step_RK33(ops, gravity, zb_cell, fb_weight, dt,
+def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
+              uu_tiny, pv_tiny, fb_weight, dt,
               hh_cell, uu_edge):
 
 #-- A 3-stage 3rd/2nd-order RK scheme:
@@ -106,7 +107,9 @@ def step_RK33(ops, gravity, zb_cell, fb_weight, dt,
 
     h1_cell = hh_cell - k1_step * h0_tend
 
-    u0_tend = rhs_slw_u(ops, hh_cell, uk_edge, u0_tend)
+    u0_tend = rhs_slw_u(
+        ops, hh_cell, uk_edge,
+        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, u0_tend)
     u0_tend = rhs_fst_u(ops, hh_cell, uk_edge, u0_tend)
 
     hb_cell = (0.0 + 1.0 * BETA) * h1_cell + \
@@ -129,7 +132,9 @@ def step_RK33(ops, gravity, zb_cell, fb_weight, dt,
 
     h2_cell = hh_cell - k2_step * hk_tend
 
-    uk_tend = rhs_slw_u(ops, h1_cell, uk_edge, uk_tend)
+    uk_tend = rhs_slw_u(
+        ops, h1_cell, uk_edge,
+        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uk_tend)
     uk_tend = rhs_fst_u(ops, h1_cell, uk_edge, uk_tend)
 
     hb_cell = (0.0 + 1.0 * BETA) * h2_cell + \
@@ -153,7 +158,9 @@ def step_RK33(ops, gravity, zb_cell, fb_weight, dt,
 
     h3_cell = hh_cell - k3_step * hk_tend
 
-    uk_tend = rhs_slw_u(ops, h2_cell, uk_edge, uk_tend)
+    uk_tend = rhs_slw_u(
+        ops, h2_cell, uk_edge,
+        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uk_tend)
     uk_tend = rhs_fst_u(ops, h2_cell, uk_edge, uk_tend)
 
     uk_tend = +1./4. * u0_tend + 3./4. * uk_tend
@@ -169,8 +176,9 @@ def step_RK33(ops, gravity, zb_cell, fb_weight, dt,
     return h3_cell, uk_edge
 
 
-@partial(jax.jit, static_argnums=(6,))
-def run_scan(ops, gravity, zb_cell, fb_weight, dt,
+@partial(jax.jit, static_argnums=(11,))
+def run_scan(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
+             uu_tiny, pv_tiny, fb_weight, dt,
              state, nstep):
 
 #-- advance NSTEP fixed-dt RK33-FB steps back-to-back on-device,
@@ -180,7 +188,8 @@ def run_scan(ops, gravity, zb_cell, fb_weight, dt,
     def body(carry, _):
         hh_cell, uu_edge = carry
         hh_cell, uu_edge = step_RK33(
-            ops, gravity, zb_cell, fb_weight, dt,
+            ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
+            uu_tiny, pv_tiny, fb_weight, dt,
             hh_cell, uu_edge)
         return (hh_cell, uu_edge), None
 
