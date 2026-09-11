@@ -247,7 +247,12 @@ def _build_pv(ops, uu_edge, ff_dual, ff_edge, ff_cell):
     rv_cell = gather_apply(ops.cell_kite_sums, rv_dual) / ops.cell_area
     pv_cell = rv_cell + ff_cell
 
-    return pv_dual, pv_wide, pv_cell, pv_edge
+    # accumulated in main's nogil loop as a running mean-square over
+    # pv_wide as it's computed; mathematically identical computed
+    # afterward here
+    pv_rms_ = jnp.sqrt(jnp.mean(pv_wide * pv_wide))
+
+    return pv_dual, pv_wide, pv_cell, pv_edge, pv_rms_
 
 
 def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
@@ -262,7 +267,9 @@ def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
 #-- Generic ss_* naming kept from main since this is a general
 #-- upwinding utility, not PV-specific -- calc_u_pv below is what
 #-- binds ss_wide/ss_dual/ss_cell/ss_edge to pv_wide/pv_dual/pv_cell/
-#-- pv_edge.
+#-- pv_edge, and (like main) is responsible for clamping ss_tiny
+#-- against ss_rms_ before calling in here -- this function just
+#-- takes ss_tiny as an already-final value, same as main.
 
     dN_edge = gather_apply(ops.edge_grad_norm, ss_cell)
     dP_edge = gather_apply(ops.edge_grad_perp, ss_dual)
@@ -273,11 +280,6 @@ def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
     # mesh.edge.slen = 0.5 * sqrt(edge.area * 2), doubled on wall
     # edges in main -- omitted here, no walls on the jet mesh.
     slen = jnp.sqrt(ops.edge_area / 2.0)
-
-    # main also does ss_tiny = max(ss_tiny, 2*eps(reals_t)*ss_rms_),
-    # ss_rms_ the RMS of ss_wide recomputed fresh each call
-    ss_rms_ = jnp.sqrt(jnp.mean(ss_wide * ss_wide))
-    ss_tiny = jnp.maximum(ss_tiny, 2.0 * jnp.finfo(reals_t).eps * ss_rms_)
 
     ds_edge = ss_tiny + slen * 0.5 * (jnp.abs(dN_edge) + jnp.abs(dP_edge))
 
@@ -312,8 +314,10 @@ def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
 #-- pv_wide/rv_cell/pv_cell/pv_bias for diagnostics -- dropped here
 #-- since tend_uadv (the only caller) only needs the final pv_edge.
 
-    pv_dual, pv_wide, pv_cell, pv_edge = _build_pv(
+    pv_dual, pv_wide, pv_cell, pv_edge, pv_rms_ = _build_pv(
         ops, uu_edge, ff_dual, ff_edge, ff_cell)
+
+    pv_tiny = jnp.maximum(pv_tiny, 2.0 * jnp.finfo(reals_t).eps * pv_rms_)
 
     pv_edge = upwinding(
         ops, pv_wide, pv_dual, pv_cell, uu_edge, vv_edge, pv_edge,
