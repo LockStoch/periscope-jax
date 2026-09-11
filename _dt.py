@@ -76,9 +76,9 @@ def init_RKFB(cnfg):
     return cnfg
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=(9,))
 def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
-              uu_tiny, pv_tiny, fb_weight, dt,
+              uu_tiny, pv_tiny, pv_upwind, pv_scheme, fb_weight, dt,
               hh_cell, uu_edge):
 
 #-- A 3-stage 3rd/2nd-order RK scheme:
@@ -88,11 +88,19 @@ def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
 #-- pure jax: OPS is an ops.JaxOps bundle of gather-operator
 #-- arrays (fixed for the whole run), everything else is a jnp
 #-- array or scalar. jit-compiled; called many times back-to-back
-#-- by run_scan below.
+#-- by run_scan below. PV_SCHEME is a plain Python string (cnfg.
+#-- pv_scheme), static_argnums'd since it picks which upwinding
+#-- formula gets traced (see _dx.py's upwinding()), not a value that
+#-- can vary at runtime inside a compiled call.
 
     k1_step = 1.0 / 3.0 * dt
     k2_step = 2.0 / 3.0 * dt
     k3_step = 1.0 / 1.0 * dt
+
+    # main passes +1./2.*cnfg.time_step as calc_u_pv's delta_t (used
+    # only by the APVM/LAXWENDROFF upwinding branch) -- same fixed
+    # half-timestep every RK sub-stage, so compute it once here.
+    delta_t = 0.5 * dt
 
 #-- 1st RK + FB stage
 
@@ -108,8 +116,8 @@ def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
     h1_cell = hh_cell - k1_step * h0_tend
 
     u0_tend = rhs_slw_u(
-        ops, hh_cell, uk_edge,
-        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, u0_tend)
+        ops, hh_cell, uk_edge, ff_dual, ff_edge, ff_cell,
+        delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme, u0_tend)
     u0_tend = rhs_fst_u(ops, hh_cell, uk_edge, u0_tend)
 
     hb_cell = (0.0 + 1.0 * BETA) * h1_cell + \
@@ -133,8 +141,8 @@ def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
     h2_cell = hh_cell - k2_step * hk_tend
 
     uk_tend = rhs_slw_u(
-        ops, h1_cell, uk_edge,
-        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uk_tend)
+        ops, h1_cell, uk_edge, ff_dual, ff_edge, ff_cell,
+        delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme, uk_tend)
     uk_tend = rhs_fst_u(ops, h1_cell, uk_edge, uk_tend)
 
     hb_cell = (0.0 + 1.0 * BETA) * h2_cell + \
@@ -159,8 +167,8 @@ def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
     h3_cell = hh_cell - k3_step * hk_tend
 
     uk_tend = rhs_slw_u(
-        ops, h2_cell, uk_edge,
-        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uk_tend)
+        ops, h2_cell, uk_edge, ff_dual, ff_edge, ff_cell,
+        delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme, uk_tend)
     uk_tend = rhs_fst_u(ops, h2_cell, uk_edge, uk_tend)
 
     uk_tend = +1./4. * u0_tend + 3./4. * uk_tend
@@ -176,9 +184,9 @@ def step_RK33(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
     return h3_cell, uk_edge
 
 
-@partial(jax.jit, static_argnums=(11,))
+@partial(jax.jit, static_argnums=(9, 13))
 def run_scan(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
-             uu_tiny, pv_tiny, fb_weight, dt,
+             uu_tiny, pv_tiny, pv_upwind, pv_scheme, fb_weight, dt,
              state, nstep):
 
 #-- advance NSTEP fixed-dt RK33-FB steps back-to-back on-device,
@@ -189,7 +197,7 @@ def run_scan(ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
         hh_cell, uu_edge = carry
         hh_cell, uu_edge = step_RK33(
             ops, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
-            uu_tiny, pv_tiny, fb_weight, dt,
+            uu_tiny, pv_tiny, pv_upwind, pv_scheme, fb_weight, dt,
             hh_cell, uu_edge)
         return (hh_cell, uu_edge), None
 

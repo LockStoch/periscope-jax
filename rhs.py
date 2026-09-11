@@ -38,8 +38,8 @@ def rhs_all_h(ops, hh_cell, uu_edge, hh_tend):
     return hh_tend
 
 
-def rhs_slw_u(ops, hh_cell, uu_edge,
-              ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend):
+def rhs_slw_u(ops, hh_cell, uu_edge, ff_dual, ff_edge, ff_cell,
+              delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme, uu_tend):
 
 #-- evaluate slow tendencies dU/dt = RHS(t,U,H)
 
@@ -52,7 +52,7 @@ def rhs_slw_u(ops, hh_cell, uu_edge,
 
     pv_edge = calc_u_pv(
         ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
-        pv_tiny, uu_tiny)
+        delta_t, pv_tiny, uu_tiny, pv_upwind, pv_scheme)
 
     uu_tend = tend_uadv(
         ops, hh_edge, hh_quad, uu_edge, pv_edge, ke_cell,
@@ -78,14 +78,15 @@ def rhs_pgf_u(ops, hh_cell, zb_cell, gravity, uu_tend):
     return uu_tend
 
 
-def rhs_all_u(ops, hh_cell, uu_edge, zb_cell, gravity,
-              ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend):
+def rhs_all_u(ops, hh_cell, uu_edge, zb_cell, gravity, ff_dual, ff_edge,
+              ff_cell, delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme,
+              uu_tend):
 
 #-- evaluate full tendencies dU/dt = RHS(t,U,H)
 
     uu_tend = rhs_slw_u(
-        ops, hh_cell, uu_edge,
-        ff_dual, ff_edge, ff_cell, uu_tiny, pv_tiny, uu_tend)
+        ops, hh_cell, uu_edge, ff_dual, ff_edge, ff_cell,
+        delta_t, uu_tiny, pv_tiny, pv_upwind, pv_scheme, uu_tend)
 
     uu_tend = rhs_fst_u(ops, hh_cell, uu_edge, uu_tend)
 

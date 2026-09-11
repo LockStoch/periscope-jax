@@ -150,13 +150,17 @@ def tend_upgf(ops, hh_cell, zb_cell, gravity, uu_tend):
 #-- threaded through as extra JaxOps fields. Revisit if this port is
 #-- ever pointed at a regional/walled mesh (Stage 5 territory).
 #--
-#-- Config knobs baked in at their swe.py defaults (not threaded
-#-- through as CLI flags, consistent with the rest of this reduced
-#-- port): hh_scheme=CENTRE (see calc_hmap below), ke_weight=1.0 +
-#-- ke_method=1.0 (pure cell-wing KE remap, no dual-blend term),
+#-- Most config knobs are baked in at their swe.py defaults (not
+#-- threaded through as CLI flags): hh_scheme=CENTRE (see calc_hmap
+#-- below), ke_weight=1.0 + ke_method=1.0 (pure cell-wing KE remap, no
+#-- dual-blend term), pv_weight=0.1 (see tend_uadv below),
 #-- wetdry_h0=0.0 (its swe.py default; the KE wet-dry factor below
 #-- still applies since it doesn't vanish at wetdry_h0=0, it's a
-#-- genuine hh_cell/hh_quad ratio correction).
+#-- genuine hh_cell/hh_quad ratio correction). The exception is
+#-- pv_scheme/pv_upwind (calc_u_pv/upwinding below), which ARE
+#-- genuinely threaded through from cnfg -- --pv-scheme APVM,
+#-- AUST-CONST, AUST-ADAPT or CENTRE all work, as a static/
+#-- compile-time choice (see upwinding()'s docstring for why).
 #--
 #-- Function names/boundaries below match main's _dx.py one-for-one
 #-- (calc_hmap, calc_perp, calc_u_ke, _build_pv, upwinding, calc_u_pv,
@@ -255,21 +259,39 @@ def _build_pv(ops, uu_edge, ff_dual, ff_edge, ff_cell):
     return pv_dual, pv_wide, pv_cell, pv_edge, pv_rms_
 
 
+UP_TINY_ = 1.0E-02  # main's up_tiny kwarg default (not a CLI flag)
+
+
 def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
-              ss_tiny, uu_tiny, up_phi_, up_tiny):
+              delta_t, ss_tiny, uu_tiny, up_phi_, up_kind):
 
 #-- streamline upwinding for a variable S -- main's upwinding()/
-#-- _upwinding, AUST-ADAPT branch only. main's up_kind selects between
-#-- three formulas: APVM/LAXWENDROFF (one shared branch -- both names
-#-- trigger identical code, a Lagrangian departure-point formulation),
-#-- AUST-CONST (a constant, non-adaptive upwind bias), and AUST-ADAPT
-#-- (this one, cnfg.pv_scheme's swe.py default -- bias scales with how
-#-- much pv actually varies locally, see ss_bias below). Only
-#-- AUST-ADAPT is implemented here; up_kind and mesh/mats/cnfg/
-#-- delta_t/up_bias are dropped from the signature since this branch
-#-- doesn't use them -- delta_t is only read by the APVM/LAXWENDROFF
-#-- branch, up_bias only under the (also unimplemented)
-#-- cnfg.save_vars gate.
+#-- _upwinding. up_kind selects the formula:
+#--   "APVM"/"LAXWENDROFF" -- one shared branch in main (identical
+#--     code either name) -- Lagrangian departure-point correction,
+#--     scaled by delta_t.
+#--   "AUST-CONST" -- upwind bias is the constant up_phi_.
+#--   "AUST-ADAPT" -- upwind bias adapts to how much ss actually
+#--     varies locally (cnfg.pv_scheme's swe.py default).
+#--   "CENTRE" -- in main this isn't a real branch: up_kind matching
+#--     none of the three if/elif conditions above just falls through
+#--     with ss_edge/up_bias unchanged, i.e. no upwinding at all. Made
+#--     an explicit branch here rather than relying on the same
+#--     implicit fallthrough -- note this means an unrecognised
+#--     up_kind (a typo, say) raises below instead of silently doing
+#--     the same no-op main would. That's a deliberate difference, not
+#--     one JAX forces: matching main's silent fallthrough exactly
+#--     would just be carrying a latent footgun forward.
+#-- up_kind must be a plain Python string, not a jax value -- it's a
+#-- compile-time choice (static_argnums in _dt.py's step_RK33/
+#-- run_scan), not something that can vary per traced call.
+#--
+#-- mesh/mats/cnfg collapse to ops (as everywhere else in this port);
+#-- up_bias, main's other per-edge output (gated behind
+#-- cnfg.save_vars, off by default), isn't threaded through -- same
+#-- simplification already made elsewhere in this port for
+#-- diagnostic-only, opt-in output fields.
+#--
 #-- Generic ss_* naming kept from main since this is a general
 #-- upwinding utility, not PV-specific -- calc_u_pv below is what
 #-- binds ss_wide/ss_dual/ss_cell/ss_edge to pv_wide/pv_dual/pv_cell/
@@ -277,48 +299,72 @@ def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
 #-- against ss_rms_ before calling in here -- this function just
 #-- takes ss_tiny as an already-final value, same as main.
 
+    if up_kind == "CENTRE":
+        return ss_edge
+
+    # dN_edge/dP_edge needed by every implemented branch; main
+    # recomputes these per-branch (each is its own nogil loop), no
+    # reason to duplicate that in a vectorised JAX implementation.
     dN_edge = gather_apply(ops.edge_grad_norm, ss_cell)
     dP_edge = gather_apply(ops.edge_grad_perp, ss_dual)
 
-    # up_bias += |large - small| stencils
-    up_sum_ = gather_apply(ops.edge_vert_sums, jnp.abs(ss_wide - ss_dual))
+    if up_kind in ("APVM", "LAXWENDROFF"):
+
+        # lagrangian APVM, scale w. flow
+        ss_edge = ss_edge - delta_t * (
+            uu_edge * dN_edge + vv_edge * dP_edge)
+
+        return ss_edge
 
     # mesh.edge.slen = 0.5 * sqrt(edge.area * 2), doubled on wall
     # edges in main -- omitted here, no walls on the jet mesh.
     slen = jnp.sqrt(ops.edge_area / 2.0)
 
-    ds_edge = ss_tiny + slen * 0.5 * (jnp.abs(dN_edge) + jnp.abs(dP_edge))
-
-    ss_bias = up_phi_ * up_sum_ / ds_edge
-
-    # up^k/(up^k+1.) polynomial limiting
-    ss_bias = ss_bias * ss_bias
-    ss_bias = ss_bias / (ss_bias + 1.0)
-
-    # always need to have some upwinding
-    ss_bias = ss_bias + up_tiny
-
     um_edge = uu_tiny + jnp.sqrt(uu_edge * uu_edge + vv_edge * vv_edge)
 
-    ss_edge = ss_edge - ss_bias / um_edge * (
-        uu_edge * dN_edge + vv_edge * dP_edge) * slen
+    if up_kind == "AUST-CONST":
 
-    return ss_edge
+        # just a constant upstream bias term
+        ss_edge = ss_edge - up_phi_ / um_edge * (
+            uu_edge * dN_edge + vv_edge * dP_edge) * slen
 
+        return ss_edge
 
-PV_UPWIND = 1.0000   # cnfg default (--pv-upwind), main's up_phi_ argument
-UP_TINY_  = 1.0E-02  # main's up_tiny kwarg default
+    if up_kind == "AUST-ADAPT":
+
+        # up_bias += |large - small| stencils
+        up_sum_ = gather_apply(
+            ops.edge_vert_sums, jnp.abs(ss_wide - ss_dual))
+
+        ds_edge = ss_tiny + slen * 0.5 * (
+            jnp.abs(dN_edge) + jnp.abs(dP_edge))
+
+        ss_bias = up_phi_ * up_sum_ / ds_edge
+
+        # up^k/(up^k+1.) polynomial limiting
+        ss_bias = ss_bias * ss_bias
+        ss_bias = ss_bias / (ss_bias + 1.0)
+
+        # always need to have some upwinding
+        ss_bias = ss_bias + UP_TINY_
+
+        ss_edge = ss_edge - ss_bias / um_edge * (
+            uu_edge * dN_edge + vv_edge * dP_edge) * slen
+
+        return ss_edge
+
+    raise ValueError(f"upwinding: unknown up_kind {up_kind!r}")
 
 
 def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
-              pv_tiny, uu_tiny):
+              delta_t, pv_tiny, uu_tiny, pv_upwind, pv_scheme):
 
 #-- compute potential (absolute) vorticity -- main's calc_u_pv:
 #-- orchestrates _build_pv (raw pv at every staggering) then
-#-- upwinding() (the AUST-adapt blend), returning the final
-#-- upwind-biased pv_edge. Main also returns rv_dual/pv_dual/rv_wide/
-#-- pv_wide/rv_cell/pv_cell/pv_bias for diagnostics -- dropped here
-#-- since tend_uadv (the only caller) only needs the final pv_edge.
+#-- upwinding() (the pv_scheme-selected blend), returning the final
+#-- pv_edge. Main also returns rv_dual/pv_dual/rv_wide/pv_wide/
+#-- rv_cell/pv_cell/pv_bias for diagnostics -- dropped here since
+#-- tend_uadv (the only caller) only needs the final pv_edge.
 
     pv_dual, pv_wide, pv_cell, pv_edge, pv_rms_ = _build_pv(
         ops, uu_edge, ff_dual, ff_edge, ff_cell)
@@ -327,7 +373,7 @@ def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
 
     pv_edge = upwinding(
         ops, pv_wide, pv_dual, pv_cell, uu_edge, vv_edge, pv_edge,
-        pv_tiny, uu_tiny, PV_UPWIND, UP_TINY_)
+        delta_t, pv_tiny, uu_tiny, pv_upwind, pv_scheme)
 
     return pv_edge
 

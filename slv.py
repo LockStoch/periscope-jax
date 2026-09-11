@@ -168,6 +168,11 @@ def swe(cnfg):
     uu_tiny = float(cnfg.uu_tiny)
     pv_tiny = float(cnfg.pv_tiny)
 
+    pv_upwind = float(cnfg.pv_upwind)
+    pv_scheme = cnfg.pv_scheme  # already upper()'d by swe.py; a plain
+                                 # Python str -- static_argnums'd into
+                                 # step_RK33/run_scan (see _dt.py)
+
     nsteps = int(cnfg.iteration)
     save_freq = int(cnfg.save_freq)
     stat_freq = int(cnfg.stat_freq)
@@ -225,7 +230,7 @@ def swe(cnfg):
 
         state = run_scan(
             mats.jx, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
-            uu_tiny, pv_tiny, fb_weight, dt,
+            uu_tiny, pv_tiny, pv_upwind, pv_scheme, fb_weight, dt,
                                         state, take)
 
         step+= take
