@@ -259,11 +259,17 @@ def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
               ss_tiny, uu_tiny, up_phi_, up_tiny):
 
 #-- streamline upwinding for a variable S -- main's upwinding()/
-#-- _upwinding, AUST-ADAPT branch only (the up_kind == "APVM"/
-#-- "AUST-CONST" branches aren't implemented; up_kind and mesh/mats/
-#-- cnfg/delta_t/up_bias are dropped from the signature since AUST-
-#-- ADAPT doesn't use them -- delta_t is only read by the APVM branch,
-#-- up_bias only under the (also unimplemented) cnfg.save_vars gate).
+#-- _upwinding, AUST-ADAPT branch only. main's up_kind selects between
+#-- three formulas: APVM/LAXWENDROFF (one shared branch -- both names
+#-- trigger identical code, a Lagrangian departure-point formulation),
+#-- AUST-CONST (a constant, non-adaptive upwind bias), and AUST-ADAPT
+#-- (this one, cnfg.pv_scheme's swe.py default -- bias scales with how
+#-- much pv actually varies locally, see ss_bias below). Only
+#-- AUST-ADAPT is implemented here; up_kind and mesh/mats/cnfg/
+#-- delta_t/up_bias are dropped from the signature since this branch
+#-- doesn't use them -- delta_t is only read by the APVM/LAXWENDROFF
+#-- branch, up_bias only under the (also unimplemented)
+#-- cnfg.save_vars gate.
 #-- Generic ss_* naming kept from main since this is a general
 #-- upwinding utility, not PV-specific -- calc_u_pv below is what
 #-- binds ss_wide/ss_dual/ss_cell/ss_edge to pv_wide/pv_dual/pv_cell/
