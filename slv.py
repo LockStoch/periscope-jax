@@ -28,7 +28,7 @@ from mem import variables as _var
 
 from io_ import init_file, save_step, save_last
 
-from _dt import init_RKFB, init_step, run_scan
+from _dt import init_RKFB, init_step, run_scan, Consts
 from _dx import invariant
 
 def swe(cnfg):
@@ -155,20 +155,26 @@ def swe(cnfg):
     )
 
     dt = float(cnfg.time_step)
-    gravity = float(flow.gravity)
-    zb_cell = jnp.asarray(flow.zb_cell, dtype=reals_t)
-    fb_weight = jnp.asarray(cnfg.fb_weight, dtype=reals_t)
 
-    # Coriolis (Stage 1: momentum advection) -- computed once by
-    # pre() above, already masked by --no-rotate there
-    ff_dual = jnp.asarray(_var.ff_vert, dtype=reals_t)
-    ff_edge = jnp.asarray(_var.ff_edge, dtype=reals_t)
-    ff_cell = jnp.asarray(_var.ff_cell, dtype=reals_t)
+    # physical constants + numerical-regularisation scalars, fixed for
+    # the whole run -- bundled into one Consts pytree (see _dt.py) so
+    # they don't need threading individually through every dispatcher
+    # function, the way main avoids that via flow/cnfg/the variables
+    # pool. ff_dual/ff_edge/ff_cell (Coriolis) were computed once by
+    # pre() above, already masked by --no-rotate there.
+    phys = Consts(
+        gravity=float(flow.gravity),
+        zb_cell=jnp.asarray(flow.zb_cell, dtype=reals_t),
+        ff_dual=jnp.asarray(_var.ff_vert, dtype=reals_t),
+        ff_edge=jnp.asarray(_var.ff_edge, dtype=reals_t),
+        ff_cell=jnp.asarray(_var.ff_cell, dtype=reals_t),
+        uu_tiny=float(cnfg.uu_tiny),
+        pv_tiny=float(cnfg.pv_tiny),
+        pv_upwind=float(cnfg.pv_upwind),
+        fb_weight=jnp.asarray(cnfg.fb_weight, dtype=reals_t),
+        dt=dt,
+    )
 
-    uu_tiny = float(cnfg.uu_tiny)
-    pv_tiny = float(cnfg.pv_tiny)
-
-    pv_upwind = float(cnfg.pv_upwind)
     pv_scheme = cnfg.pv_scheme  # already upper()'d by swe.py; a plain
                                  # Python str -- static_argnums'd into
                                  # step_RK33/run_scan (see _dt.py)
@@ -228,10 +234,7 @@ def swe(cnfg):
 
         take = min(chunk, nsteps - step)
 
-        state = run_scan(
-            mats.jx, gravity, zb_cell, ff_dual, ff_edge, ff_cell,
-            uu_tiny, pv_tiny, pv_upwind, pv_scheme, fb_weight, dt,
-                                        state, take)
+        state = run_scan(mats.jx, phys, pv_scheme, state, take)
 
         step+= take
         cnfg.timeisnow = cnfg.timestart + step * dt
