@@ -69,49 +69,53 @@ class JaxOps(NamedTuple):
 #-- jax-ready "gather" forms of the operators needed by the physics in
 #-- _dx.py, plus the geometric weights they're normalised by. A plain
 #-- NamedTuple-of-GatherOps so it's a valid pytree and can be passed
-#-- straight into jax.jit/lax.scan.
+#-- straight into jax.jit/lax.scan. Field names match the sparse
+#-- operator/mesh-field names in ops.py/main exactly (e.g.
+#-- ops.jx.cell_flux_sums is the gather form of mats.cell_flux_sums)
+#-- rather than abbreviating them, so this stays directly comparable
+#-- to the original.
 
-    div:        GatherOp  # cell_flux_sums:  edge flux -> cell div.
-    grad:       GatherOp  # edge_grad_norm:  cell field -> edge grad.
-    grad_perp:  GatherOp  # edge_grad_perp:  dual field -> edge grad.
-    wing:       GatherOp  # edge_wing_sums:  cell -> edge remap
-    dual_kite:  GatherOp  # dual_kite_sums:  cell -> dual remap
-    dual_tail:  GatherOp  # dual_tail_sums:  edge -> dual remap
-    dual_curl:  GatherOp  # dual_curl_sums:  edge -> dual curl
-    dual_edge:  GatherOp  # dual_edge_sums:  edge -> dual average
-    edge_vert:  GatherOp  # edge_vert_sums:  dual -> edge average
-    cell_wing:  GatherOp  # cell_wing_sums:  edge -> cell remap
-    cell_kite:  GatherOp  # cell_kite_sums:  dual -> cell remap
-    edge_cell:  GatherOp  # edge_cell_sums:  cell -> edge average
-    edge_perp:  GatherOp  # edge_lsqr_perp:  edge norm -> edge perp
-    flux_perp:  GatherOp  # edge_flux_perp:  perp flux reconstruction
-    cell_area:  jnp.ndarray
-    edge_area:  jnp.ndarray
-    dual_area:  jnp.ndarray
-    quad_area:  jnp.ndarray
+    cell_flux_sums: GatherOp
+    edge_grad_norm: GatherOp
+    edge_grad_perp: GatherOp
+    edge_wing_sums: GatherOp
+    dual_kite_sums: GatherOp
+    dual_tail_sums: GatherOp
+    dual_curl_sums: GatherOp
+    dual_edge_sums: GatherOp
+    edge_vert_sums: GatherOp
+    cell_wing_sums: GatherOp
+    cell_kite_sums: GatherOp
+    edge_cell_sums: GatherOp
+    edge_lsqr_perp: GatherOp
+    edge_flux_perp: GatherOp
+    cell_area:      jnp.ndarray  # mesh.cell.area
+    edge_area:      jnp.ndarray  # mesh.edge.area
+    vert_area:      jnp.ndarray  # mesh.vert.area
+    quad_area:      jnp.ndarray  # mesh.quad.area
 
 
 def to_jax(mats, mesh):
 #-- build the JaxOps bundle and attach it to MATS as MATS.jx
 
     mats.jx = JaxOps(
-        div=gather_op(mats.cell_flux_sums),
-        grad=gather_op(mats.edge_grad_norm),
-        grad_perp=gather_op(mats.edge_grad_perp),
-        wing=gather_op(mats.edge_wing_sums),
-        dual_kite=gather_op(mats.dual_kite_sums),
-        dual_tail=gather_op(mats.dual_tail_sums),
-        dual_curl=gather_op(mats.dual_curl_sums),
-        dual_edge=gather_op(mats.dual_edge_sums),
-        edge_vert=gather_op(mats.edge_vert_sums),
-        cell_wing=gather_op(mats.cell_wing_sums),
-        cell_kite=gather_op(mats.cell_kite_sums),
-        edge_cell=gather_op(mats.edge_cell_sums),
-        edge_perp=gather_op(mats.edge_lsqr_perp),
-        flux_perp=gather_op(mats.edge_flux_perp),
+        cell_flux_sums=gather_op(mats.cell_flux_sums),
+        edge_grad_norm=gather_op(mats.edge_grad_norm),
+        edge_grad_perp=gather_op(mats.edge_grad_perp),
+        edge_wing_sums=gather_op(mats.edge_wing_sums),
+        dual_kite_sums=gather_op(mats.dual_kite_sums),
+        dual_tail_sums=gather_op(mats.dual_tail_sums),
+        dual_curl_sums=gather_op(mats.dual_curl_sums),
+        dual_edge_sums=gather_op(mats.dual_edge_sums),
+        edge_vert_sums=gather_op(mats.edge_vert_sums),
+        cell_wing_sums=gather_op(mats.cell_wing_sums),
+        cell_kite_sums=gather_op(mats.cell_kite_sums),
+        edge_cell_sums=gather_op(mats.edge_cell_sums),
+        edge_lsqr_perp=gather_op(mats.edge_lsqr_perp),
+        edge_flux_perp=gather_op(mats.edge_flux_perp),
         cell_area=jnp.asarray(mesh.cell.area, dtype=reals_t),
         edge_area=jnp.asarray(mesh.edge.area, dtype=reals_t),
-        dual_area=jnp.asarray(mesh.vert.area, dtype=reals_t),
+        vert_area=jnp.asarray(mesh.vert.area, dtype=reals_t),
         quad_area=jnp.asarray(mesh.quad.area, dtype=reals_t),
     )
 

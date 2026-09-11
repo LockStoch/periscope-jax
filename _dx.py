@@ -116,11 +116,12 @@ def tend_hadv(ops, hh_cell, uu_edge, hh_tend):
 #-- via rhs_all_d and reuses it across tend_hadv/tend_uadv, this port
 #-- doesn't have that precompute stage (see calc_hmap's docstring).
 
-    hh_edge = gather_apply(ops.wing, hh_cell) / ops.edge_area
+    hh_edge = gather_apply(ops.edge_wing_sums, hh_cell) / ops.edge_area
 
     uh_flux = uu_edge * hh_edge
 
-    hh_tend = hh_tend + gather_apply(ops.div, uh_flux) / ops.cell_area
+    hh_tend = hh_tend + \
+        gather_apply(ops.cell_flux_sums, uh_flux) / ops.cell_area
 
     return hh_tend
 
@@ -131,7 +132,8 @@ def tend_upgf(ops, hh_cell, zb_cell, gravity, uu_tend):
 
     zt_cell = zb_cell + hh_cell
 
-    uu_tend = uu_tend + gravity * gather_apply(ops.grad, zt_cell)
+    uu_tend = uu_tend + \
+        gravity * gather_apply(ops.edge_grad_norm, zt_cell)
 
     return uu_tend
 
@@ -172,12 +174,13 @@ def calc_hmap(ops, hh_cell):
 #-- value, hh_bias -- both only relevant to the UPWIND wave-speed
 #-- blend, dropped here since that branch isn't implemented.
 
-    hh_dual = gather_apply(ops.dual_kite, hh_cell) / ops.dual_area
-    hh_edge = gather_apply(ops.wing, hh_cell) / ops.edge_area
+    hh_dual = gather_apply(ops.dual_kite_sums, hh_cell) / ops.vert_area
+    hh_edge = gather_apply(ops.edge_wing_sums, hh_cell) / ops.edge_area
 
     # PV "quad" point: Simpson's-rule blend of the edge value and its
     # two neighbouring duals.
-    hh_quad = (4.0 * hh_edge + gather_apply(ops.edge_vert, hh_dual)) / 6.0
+    hh_quad = (
+        4.0 * hh_edge + gather_apply(ops.edge_vert_sums, hh_dual)) / 6.0
 
     return hh_dual, hh_edge, hh_quad
 
@@ -188,7 +191,7 @@ def calc_perp(ops, uu_edge):
 #-- calc_perp/_calc_perp, LSQR form. (mesh.edge.perp wall-factor
 #-- omitted, see note above -- it's 1 everywhere for the jet mesh.)
 
-    return gather_apply(ops.edge_perp, uu_edge)
+    return gather_apply(ops.edge_lsqr_perp, uu_edge)
 
 
 def calc_u_ke(ops, hh_cell, hh_quad, uu_edge, vv_edge):
@@ -202,13 +205,13 @@ def calc_u_ke(ops, hh_cell, hh_quad, uu_edge, vv_edge):
 
     ke_edge = 0.5 * (uu_edge * uu_edge + vv_edge * vv_edge)
 
-    hq_gather = hh_quad[ops.cell_wing.idx]
-    ke_gather = ke_edge[ops.cell_wing.idx]
+    hq_gather = hh_quad[ops.cell_wing_sums.idx]
+    ke_gather = ke_edge[ops.cell_wing_sums.idx]
 
     h_fac = (hh_cell[:, None] / hq_gather) ** 2
 
     ke_cell = jnp.sum(
-        ops.cell_wing.wgt * h_fac * ke_gather, axis=-1) / ops.cell_area
+        ops.cell_wing_sums.wgt * h_fac * ke_gather, axis=-1) / ops.cell_area
 
     return ke_cell
 
@@ -218,79 +221,85 @@ def _build_pv(ops, uu_edge, ff_dual, ff_edge, ff_cell):
 #-- compute discrete vorticity -- main's private _build_pv (in
 #-- _dx.py, wraps the Cython _calc_u_pv kernel), the pre-upwinding
 #-- portion of PV. Returns pv_dual, pv_wide, pv_cell (dual /
-#-- dual-Gassmann-widened / cell centred) plus pv_edge_ctr, the
-#-- centred (non-upwinded) edge estimate that upwinding() below blends
-#-- against pv_wide/pv_dual/pv_cell to get the final pv_edge. Main
-#-- also returns rv_dual/rv_wide/rv_cell (relative vorticity, pre-+f)
-#-- and a pv_rms_ scalar -- rv_* dropped here since nothing downstream
-#-- needs them on their own, pv_rms_ is recomputed inline by
-#-- upwinding() below instead of threaded through.
+#-- dual-Gassmann-widened / cell centred) plus pv_edge, the centred
+#-- (non-upwinded) edge estimate that upwinding() below blends against
+#-- pv_wide/pv_dual/pv_cell to get the final upwind-biased pv_edge
+#-- (main reuses the same pv_edge name for both -- see calc_u_pv).
+#-- Main also returns rv_dual/rv_wide/rv_cell (relative vorticity,
+#-- pre-+f) and a pv_rms_ scalar -- rv_* dropped here since nothing
+#-- downstream needs them on their own, pv_rms_ is recomputed inline
+#-- by upwinding() below instead of threaded through.
 
-    rv_dual = gather_apply(ops.dual_curl, uu_edge) / ops.dual_area
+    rv_dual = gather_apply(ops.dual_curl_sums, uu_edge) / ops.vert_area
     pv_dual = rv_dual + ff_dual
 
-    dual_area_gather = ops.dual_area[ops.edge_vert.idx]
+    vert_area_gather = ops.vert_area[ops.edge_vert_sums.idx]
     rv_edge = jnp.sum(
-        ops.edge_vert.wgt * dual_area_gather * rv_dual[ops.edge_vert.idx],
-        axis=-1) / ops.quad_area
-    pv_edge_ctr = rv_edge + ff_edge
+        ops.edge_vert_sums.wgt * vert_area_gather *
+        rv_dual[ops.edge_vert_sums.idx], axis=-1) / ops.quad_area
+    pv_edge = rv_edge + ff_edge
 
     rv_wide = jnp.sum(
-        ops.dual_edge.wgt * rv_edge[ops.dual_edge.idx],
-        axis=-1) / jnp.sum(ops.dual_edge.wgt, axis=-1)
+        ops.dual_edge_sums.wgt * rv_edge[ops.dual_edge_sums.idx],
+        axis=-1) / jnp.sum(ops.dual_edge_sums.wgt, axis=-1)
     pv_wide = rv_wide + ff_dual
 
-    rv_cell = gather_apply(ops.cell_kite, rv_dual) / ops.cell_area
+    rv_cell = gather_apply(ops.cell_kite_sums, rv_dual) / ops.cell_area
     pv_cell = rv_cell + ff_cell
 
-    return pv_dual, pv_wide, pv_cell, pv_edge_ctr
+    return pv_dual, pv_wide, pv_cell, pv_edge
 
 
-PV_UPWIND = 1.0000   # cnfg default (--pv-upwind); AUST-adapt bias scale
-UP_TINY_  = 1.0E-02  # hardcoded floor inside main's _upwinding (kx.pyx)
+def upwinding(ops, ss_wide, ss_dual, ss_cell, uu_edge, vv_edge, ss_edge,
+              ss_tiny, uu_tiny, up_phi_, up_tiny):
 
+#-- streamline upwinding for a variable S -- main's upwinding()/
+#-- _upwinding, AUST-ADAPT branch only (the up_kind == "APVM"/
+#-- "AUST-CONST" branches aren't implemented; up_kind and mesh/mats/
+#-- cnfg/delta_t/up_bias are dropped from the signature since AUST-
+#-- ADAPT doesn't use them -- delta_t is only read by the APVM branch,
+#-- up_bias only under the (also unimplemented) cnfg.save_vars gate).
+#-- Generic ss_* naming kept from main since this is a general
+#-- upwinding utility, not PV-specific -- calc_u_pv below is what
+#-- binds ss_wide/ss_dual/ss_cell/ss_edge to pv_wide/pv_dual/pv_cell/
+#-- pv_edge.
 
-def upwinding(ops, pv_wide, pv_dual, pv_cell, pv_edge_ctr,
-              uu_edge, vv_edge, pv_tiny, uu_tiny):
+    dN_edge = gather_apply(ops.edge_grad_norm, ss_cell)
+    dP_edge = gather_apply(ops.edge_grad_perp, ss_dual)
 
-#-- upwind-biased edge PV -- main's upwinding()/_upwinding, AUST-adapt
-#-- branch only (cnfg.pv_scheme's swe.py default; the AUST-const/APVM/
-#-- CENTRE branches aren't implemented). Blends the centred estimate
-#-- pv_edge_ctr against an upwind correction sized by how much pv
-#-- disagrees across the two duals either side of the edge
-#-- (up_sum_edge), scaled by the local PV gradient (dN_edge/dP_edge)
-#-- and a smooth 0-1 limiter. Main also takes cnfg.pv_scheme/
-#-- cnfg.pv_upwind and an up_tiny kwarg -- pv_scheme is implicit here
-#-- (only this branch exists), pv_upwind/up_tiny are the PV_UPWIND/
-#-- UP_TINY_ module constants above (both cnfg defaults).
-
-    dN_edge = gather_apply(ops.grad, pv_cell)
-    dP_edge = gather_apply(ops.grad_perp, pv_dual)
-
-    diff_vert = jnp.abs(pv_wide - pv_dual)
-    up_sum_edge = gather_apply(ops.edge_vert, diff_vert)
+    # up_bias += |large - small| stencils
+    up_sum_ = gather_apply(ops.edge_vert_sums, jnp.abs(ss_wide - ss_dual))
 
     # mesh.edge.slen = 0.5 * sqrt(edge.area * 2), doubled on wall
     # edges in main -- omitted here, no walls on the jet mesh.
     slen = jnp.sqrt(ops.edge_area / 2.0)
 
-    pv_rms = jnp.sqrt(jnp.mean(pv_wide * pv_wide))
-    pv_tiny = jnp.maximum(
-        pv_tiny, 2.0 * jnp.finfo(reals_t).eps * pv_rms)
+    # main also does ss_tiny = max(ss_tiny, 2*eps(reals_t)*ss_rms_),
+    # ss_rms_ the RMS of ss_wide recomputed fresh each call
+    ss_rms_ = jnp.sqrt(jnp.mean(ss_wide * ss_wide))
+    ss_tiny = jnp.maximum(ss_tiny, 2.0 * jnp.finfo(reals_t).eps * ss_rms_)
 
-    ds_edge = pv_tiny + slen * 0.5 * (
-        jnp.abs(dN_edge) + jnp.abs(dP_edge))
+    ds_edge = ss_tiny + slen * 0.5 * (jnp.abs(dN_edge) + jnp.abs(dP_edge))
 
-    bias = PV_UPWIND * up_sum_edge / ds_edge
-    bias = bias * bias / (bias * bias + 1.0)
-    bias = bias + UP_TINY_
+    ss_bias = up_phi_ * up_sum_ / ds_edge
+
+    # up^k/(up^k+1.) polynomial limiting
+    ss_bias = ss_bias * ss_bias
+    ss_bias = ss_bias / (ss_bias + 1.0)
+
+    # always need to have some upwinding
+    ss_bias = ss_bias + up_tiny
 
     um_edge = uu_tiny + jnp.sqrt(uu_edge * uu_edge + vv_edge * vv_edge)
 
-    pv_edge = pv_edge_ctr - bias / um_edge * (
+    ss_edge = ss_edge - ss_bias / um_edge * (
         uu_edge * dN_edge + vv_edge * dP_edge) * slen
 
-    return pv_edge
+    return ss_edge
+
+
+PV_UPWIND = 1.0000   # cnfg default (--pv-upwind), main's up_phi_ argument
+UP_TINY_  = 1.0E-02  # main's up_tiny kwarg default
 
 
 def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
@@ -303,12 +312,12 @@ def calc_u_pv(ops, uu_edge, vv_edge, ff_dual, ff_edge, ff_cell,
 #-- pv_wide/rv_cell/pv_cell/pv_bias for diagnostics -- dropped here
 #-- since tend_uadv (the only caller) only needs the final pv_edge.
 
-    pv_dual, pv_wide, pv_cell, pv_edge_ctr = _build_pv(
+    pv_dual, pv_wide, pv_cell, pv_edge = _build_pv(
         ops, uu_edge, ff_dual, ff_edge, ff_cell)
 
     pv_edge = upwinding(
-        ops, pv_wide, pv_dual, pv_cell, pv_edge_ctr,
-        uu_edge, vv_edge, pv_tiny, uu_tiny)
+        ops, pv_wide, pv_dual, pv_cell, uu_edge, vv_edge, pv_edge,
+        pv_tiny, uu_tiny, PV_UPWIND, UP_TINY_)
 
     return pv_edge
 
@@ -328,19 +337,23 @@ def tend_uadv(ops, hh_edge, hh_quad, uu_edge, pv_edge, ke_cell,
 #-- mesh.edge.fmsk (=1-edge.mask) -- both omitted here since they're
 #-- identity at this port's defaults (advection on, no walls).
 
-    pv_split = (pv_edge - ff_edge * PV_WEIGHT) / hh_quad
+    # split linear & nonlinear (curl(u) + f) / h
+    pv_edge = (pv_edge - ff_edge * PV_WEIGHT) / hh_quad
+
     uh_flux = uu_edge * hh_edge
     fh_flux = 2.0 * PV_WEIGHT * ff_edge / hh_quad
 
-    uh_gather = uh_flux[ops.flux_perp.idx]
-    fh_gather = fh_flux[ops.flux_perp.idx]
-    pv_gather = pv_split[ops.flux_perp.idx]
+    # energy neutral flux 1/2 * (W*qhu + q*W*hu)
+    uh_gather = uh_flux[ops.edge_flux_perp.idx]
+    fh_gather = fh_flux[ops.edge_flux_perp.idx]
+    pv_gather = pv_edge[ops.edge_flux_perp.idx]
 
-    uv_flux = -jnp.sum(
-        ops.flux_perp.wgt * uh_gather *
-        (fh_gather + pv_split[:, None] + pv_gather), axis=-1)
+    pv_mean = fh_gather + pv_edge[:, None] + pv_gather
 
-    ke_grad = gather_apply(ops.grad, ke_cell)
+    uv_flux = -jnp.sum(ops.edge_flux_perp.wgt * uh_gather * pv_mean, axis=-1)
+
+    # gradient of kinetic energy G * 1/2 * |u|^2
+    ke_grad = gather_apply(ops.edge_grad_norm, ke_cell)
 
     uu_tend = uu_tend + ke_grad + 0.5 * uv_flux
 
